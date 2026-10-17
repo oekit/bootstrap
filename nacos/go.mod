@@ -3,7 +3,7 @@ module github.com/oekit/bootstrap/nacos
 go 1.25.0
 
 require (
-	github.com/oekit/bootstrap v0.5.1
+	github.com/oekit/bootstrap v0.5.2
 	github.com/oekit/core v0.6.0
 	github.com/oekit/logx v0.5.0
 	github.com/oekit/nns v0.3.4

@@ -2,6 +2,14 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.3] — 2026-10-17
+
+- fix(deps): core 转直接依赖（obs.go 迁移 core/lifecycle 后的 tidy 归位，CI tidy 门禁）；bootstrap 地板 v0.5.2
+
+## [nacos/v0.2.3] — 2026-10-17
+
+- fix(deps): bootstrap 地板 v0.5.1 → v0.5.2（lifecycle 迁移版）
+
 ## [obs/v0.2.2] — 2026-10-17
 
 - fix(lifecycle): obs.go 迁移 logx/shutdown → core/lifecycle

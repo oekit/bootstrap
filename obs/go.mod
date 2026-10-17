@@ -3,7 +3,8 @@ module github.com/oekit/bootstrap/obs
 go 1.26.0
 
 require (
-	github.com/oekit/bootstrap v0.5.1
+	github.com/oekit/bootstrap v0.5.2
+	github.com/oekit/core v0.6.0
 	github.com/oekit/logx v0.5.0
 	github.com/oekit/metrics v0.1.6
 	github.com/oekit/tracing v0.2.1
@@ -19,7 +20,6 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oekit/concurrency v0.5.2 // indirect
-	github.com/oekit/core v0.6.0 // indirect
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
