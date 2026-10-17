@@ -2,6 +2,13 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.6.0] — 2026-10-17
+
+### Added
+- `App.Ready()` / `App.ReadyChan()` / `App.IsReady()` 就绪门：配合 bootstrap/nacos v0.3.0 延迟注册，
+  服务须在 server 就绪后调用 `app.Ready()` 才会进入注册中心（推荐经 hertz/kitex `RunServer`
+  的 `WithOnReady` 触发）。幂等、并发安全
+
 ## [v0.5.4] — 2026-10-17
 
 - **feat(bootstrapper)**：`WithBeforeServe(fn func() error)`——组件初始化后、

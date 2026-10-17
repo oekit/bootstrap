@@ -129,7 +129,11 @@ func New(opts ...BootstrapperOption) (*Bootstrapper, error) {
 // 执行顺序：
 //  1. 创建 lifecycle.Manager 和 App
 //  2. 按注册顺序初始化所有 Component
-//  3. 调用 userFn(app) 启动用户服务
+//     2.5 BeforeServe 钩子（引擎启动前的定制准备）
+//  3. 调用 userFn(app) 启动用户服务——server 就绪后应调用 app.Ready()
+//     触发就绪门：延迟注册型组件（如 bootstrap/nacos 的 NNS 组件，
+//     nacos/v0.3.0 起）在收到就绪信号后才注册，且关停时反注册先于
+//     server 关闭执行（对齐 go-kratos Stop 语义）
 //  4. 监听 SIGINT/SIGTERM
 //  5. 优雅关闭
 func (b *Bootstrapper) Run(userFn func(*App) error) error {

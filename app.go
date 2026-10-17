@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oekit/concurrency/async"
@@ -25,6 +26,10 @@ type App struct {
 	cancel      context.CancelFunc
 	ctx         context.Context
 	waitTimeout time.Duration // GoBackground goroutine drain timeout
+
+	readyOnce sync.Once
+	ready     chan struct{} // NewApp 初始化；Ready 时 close 广播
+	readyFlag atomic.Bool
 }
 
 type namedCloser struct {
@@ -55,6 +60,7 @@ func NewApp(mgr *lifecycle.Manager) *App {
 		cancel:      cancel,
 		ctx:         ctx,
 		waitTimeout: defaultWaitTimeout,
+		ready:       make(chan struct{}),
 	}
 
 	// 四个阶段独立注册，按注册顺序依次执行。
@@ -83,6 +89,22 @@ func NewApp(mgr *lifecycle.Manager) *App {
 func (a *App) Context() context.Context {
 	return a.ctx
 }
+
+// Ready 标记应用就绪（server 已监听、健康检查通过）。幂等，并发安全。
+// 延迟注册型组件（如 bootstrap/nacos 的 NNS 组件）在收到就绪信号后
+// 才执行注册——服务须在 server 就绪后调用本方法，否则不会进入注册中心。
+func (a *App) Ready() {
+	a.readyOnce.Do(func() {
+		a.readyFlag.Store(true)
+		close(a.ready)
+	})
+}
+
+// ReadyChan 返回就绪信号；未 Ready 时阻塞，已 Ready 立即返回。
+func (a *App) ReadyChan() <-chan struct{} { return a.ready }
+
+// IsReady 报告当前就绪状态。
+func (a *App) IsReady() bool { return a.readyFlag.Load() }
 
 // AddResource 注册需要在关闭时释放的资源。
 // name 用于日志标识，closer 是关闭函数。

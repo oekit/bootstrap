@@ -413,3 +413,61 @@ func TestWorkerManager_Close_Idempotent(t *testing.T) {
 	wm.Close()
 	wm.Close() // must not panic
 }
+
+// TestApp_ReadyGate_Idempotent verifies Ready/IsReady/ReadyChan semantics:
+// channel blocks before Ready, closes after; concurrent Ready calls are safe.
+func TestApp_ReadyGate_Idempotent(t *testing.T) {
+	app := NewApp(lifecycle.New(100 * time.Millisecond))
+
+	select {
+	case <-app.ReadyChan():
+		t.Fatal("ReadyChan should block before Ready")
+	default:
+	}
+	if app.IsReady() {
+		t.Fatal("IsReady should be false before Ready")
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); app.Ready() }()
+	}
+	wg.Wait()
+
+	select {
+	case <-app.ReadyChan():
+	default:
+		t.Fatal("ReadyChan should be closed after Ready")
+	}
+	if !app.IsReady() {
+		t.Fatal("IsReady should be true after Ready")
+	}
+	app.Ready() // 幂等：重复调用不 panic
+}
+
+// TestApp_ReadyGate_UnblocksWaiter verifies a GoBackground goroutine blocked
+// on ReadyChan is released once Ready is called.
+func TestApp_ReadyGate_UnblocksWaiter(t *testing.T) {
+	app := NewApp(lifecycle.New(100 * time.Millisecond))
+	released := make(chan struct{})
+	app.GoBackground("waiter", func(ctx context.Context) {
+		select {
+		case <-ctx.Done():
+		case <-app.ReadyChan():
+			close(released)
+		}
+	})
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-released:
+		t.Fatal("waiter released before Ready")
+	default:
+	}
+	app.Ready()
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("waiter not released after Ready")
+	}
+}
