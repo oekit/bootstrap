@@ -2,6 +2,18 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.4] — 2026-10-17
+
+- concurrency 地板 v0.5.4
+
+## [nacos/v0.2.4] — 2026-10-17
+
+- concurrency 地板 v0.5.4
+
+## [v0.5.3] — 2026-10-17
+
+- concurrency 地板 v0.5.2 → v0.5.4；嵌套 nacos/obs 同步
+
 ## [obs/v0.2.3] — 2026-10-17
 
 - fix(deps): core 转直接依赖（obs.go 迁移 core/lifecycle 后的 tidy 归位，CI tidy 门禁）；bootstrap 地板 v0.5.2
