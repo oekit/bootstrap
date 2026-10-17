@@ -2,6 +2,13 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [Unreleased]
+
+- **feat(bootstrapper)**：`WithBeforeServe(fn func() error)`——组件初始化后、
+  userFn 前的启动钩子（失败中止启动）。覆盖零断点重启的 listener fd 收养 /
+  pid 文件交接等「必须在引擎 serve 之前」的场景
+  （[#3](https://github.com/oekit/bootstrap/issues/3)）
+
 ## [v0.5.0] — 2026-10-17
 
 仓库结构重置后的首个版本（历史与旧版本号 v0.1.0–v0.4.2 已清空重做，从 v0.5.0 起算）。

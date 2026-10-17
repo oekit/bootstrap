@@ -29,6 +29,12 @@
 //
 //	app.AddResource("hertz", func(ctx context.Context) error { return h.Shutdown(ctx) })
 //
+// # BeforeServe（引擎启动前）
+//
+// WithBeforeServe(fn) 在组件初始化后、userFn 之前执行；失败中止启动。
+// 用于 listener fd 收养、pid 交接等「必须在 serve 前」的动作。bootstrap
+// 不接管 listener——自备时用 server.WithListener(ln) 即可。
+//
 // # attach 模式（NewApp）
 //
 // bootstrap.NewApp(mgr *shutdown.Manager) 是 **attach 模式**入口：只把

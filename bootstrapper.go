@@ -39,6 +39,7 @@ type Bootstrapper struct {
 	serviceName     string
 	shutdownTimeout time.Duration
 	components      []Component
+	beforeServe     []func() error
 }
 
 // BootstrapperOption 配置 Bootstrapper。
@@ -72,6 +73,27 @@ func (b *Bootstrapper) AddComponent(c Component) {
 // WithShutdownHook 添加自定义关闭钩子。
 func WithShutdownHook(name string, hook func(ctx context.Context) error) BootstrapperOption {
 	return WithComponent(&ShutdownHookComponent{ComponentName: name, Hook: hook})
+}
+
+// WithBeforeServe 注册「引擎启动前」钩子：在组件初始化之后、userFn 之前
+// 按注册顺序执行；任一返回 error 则中止启动（已初始化组件走优雅回滚）。
+//
+// 典型用途：零断点重启的 listener fd 收养（SCM_RIGHTS → restart.Adopt）、
+// pid 文件交接、启动前配置校验。这些动作必须发生在「进程已知自己角色」
+// 之后、「HTTP 引擎开始 serve」之前——userFn 是引擎跑起来之后的逻辑，
+// 装不下这段。
+//
+// 调用方自备 listener 时也可不经过本钩子，直接：
+//
+//	h := server.New(server.WithListener(ln), ...)
+//
+// bootstrap 不接管 listener 的创建/收养，只提供时机保证。
+func WithBeforeServe(fn func() error) BootstrapperOption {
+	return func(b *Bootstrapper) {
+		if fn != nil {
+			b.beforeServe = append(b.beforeServe, fn)
+		}
+	}
 }
 
 // ServiceNameAware 需要感知服务名的组件实现此接口；
@@ -123,6 +145,14 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 		if err := safeInit(c, ctx, app, mgr); err != nil {
 			mgr.Shutdown(context.Background())
 			return fmt.Errorf("bootstrap: component %s init failed: %w", c.Name(), err)
+		}
+	}
+
+	// 2.5 BeforeServe 钩子：引擎启动前的定制准备（listener 收养/pid 交接等）
+	for i, fn := range b.beforeServe {
+		if err := fn(); err != nil {
+			mgr.Shutdown(context.Background())
+			return fmt.Errorf("bootstrap: beforeServe[%d] failed: %w", i, err)
 		}
 	}
 

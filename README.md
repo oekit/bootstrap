@@ -35,6 +35,30 @@ bootstrap.Run(cfg, func(app *bootstrap.App) error {
 })
 ```
 
+## BeforeServe：引擎启动前钩子
+
+`WithBeforeServe(fn func() error)` 在组件初始化后、`userFn` 之前按注册顺序执行；
+任一返回 error 则中止启动。用于**必须发生在引擎 serve 之前**的准备：
+
+- 零断点重启的 listener fd 收养（`SCM_RIGHTS` → `restart.Adopt`）
+- pid 文件交接
+- 启动前校验
+
+```go
+b, _ := bootstrap.New(
+    bootstrap.WithServiceName("x"),
+    bootstrap.WithBeforeServe(func() error {
+        ln, err := restart.Adopt(fds) // 从环境变量收养
+        if err != nil { return err }
+        myListener = ln
+        return nil
+    }),
+)
+```
+
+bootstrap **不接管 listener 创建/收养**；自备 listener 时也可不经本钩子，
+直接 `server.New(server.WithListener(ln), ...)`。
+
 ## attach 模式
 
 `bootstrap.NewApp(mgr *shutdown.Manager)` 是 **attach 模式**入口：只把生命周期
