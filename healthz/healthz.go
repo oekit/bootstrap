@@ -13,9 +13,11 @@
 //	    return redisClient.Ping(ctx).Err()
 //	})
 //
-//	h.GET("/healthz", func(_ context.Context, c *app.RequestContext) {
-//	    status, body := healthz.Handle(c)
-//	    c.JSON(status, body)
+//	h.GET("/healthz", func(ctx context.Context, c *app.RequestContext) {
+//	    status, body := healthz.Handle(ctx) // 传 ctx（RequestContext 恰好实现
+//	    // context.Context，传 c 能编译但超时语义错）；body 已是 JSON 字符串，
+//	    // 用 c.Data 直写，勿用 c.JSON（会二次编码）
+//	    c.Data(status, "application/json; charset=utf-8", []byte(body))
 //	})
 //
 // 业务使用 liveness/readiness 分离(可选):

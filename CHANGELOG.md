@@ -2,6 +2,8 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [- docs(healthz): 包文档示例签名修正——Handle(ctx) 传参 + c.Data 直写（#4：RequestContext 恰好实现 context.Context 传 c 能编译但超时语义错；c.JSON 会双重编码 body）
+
 ## [- fix(deps): logx 地板 v0.5.0 → v0.6.0（零代码改动）
 
 ## [v0.6.0] — 2026-10-17
