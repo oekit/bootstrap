@@ -2,6 +2,18 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.1] — 2026-10-17
+
+- fix(deps): 嵌套模块地板全量对齐最新——bootstrap v0.5.1、logx v0.5.0、metrics v0.1.6、tracing v0.2.1；go 维持 1.26.0（tracing/OTel 生态传导）
+
+## [nacos/v0.2.1] — 2026-10-17
+
+- fix(deps): 嵌套模块地板全量对齐最新——bootstrap v0.5.1、core v0.6.0、logx v0.5.0、nns v0.3.4、registry v0.3.1；go 维持 1.25.0（nacos-sdk 图要求）
+
+## [v0.5.1] — 2026-10-17
+
+- fix(deps): 内部依赖地板 concurrency v0.1.5 → v0.5.2、logx v0.1.9 → v0.5.0；go 最低版本降至 1.24.0（自然落点）
+
 ## [v0.5.0] — 2026-10-17
 
 仓库结构重置后的首个版本（历史与旧版本号 v0.1.0–v0.4.2 已清空重做，从 v0.5.0 起算）。
