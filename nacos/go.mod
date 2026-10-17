@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/oekit/bootstrap v0.5.3
 	github.com/oekit/core v0.6.0
-	github.com/oekit/logx v0.5.0
+	github.com/oekit/logx v0.6.0
 	github.com/oekit/nns v0.4.0
 	github.com/oekit/registry v0.4.0
 )
