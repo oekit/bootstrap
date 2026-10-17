@@ -9,6 +9,54 @@
   pid 文件交接等「必须在引擎 serve 之前」的场景
   （[#3](https://github.com/oekit/bootstrap/issues/3)）
 
+## [obs/v0.2.5] — 2026-10-17
+
+- bootstrap v0.5.3 地板跟随
+
+## [nacos/v0.2.5] — 2026-10-17
+
+- bootstrap v0.5.3、nns v0.3.5 地板跟随
+
+## [obs/v0.2.4] — 2026-10-17
+
+- concurrency 地板 v0.5.4
+
+## [nacos/v0.2.4] — 2026-10-17
+
+- concurrency 地板 v0.5.4
+
+## [v0.5.3] — 2026-10-17
+
+- concurrency 地板 v0.5.2 → v0.5.4；嵌套 nacos/obs 同步
+
+## [obs/v0.2.3] — 2026-10-17
+
+- fix(deps): core 转直接依赖（obs.go 迁移 core/lifecycle 后的 tidy 归位，CI tidy 门禁）；bootstrap 地板 v0.5.2
+
+## [nacos/v0.2.3] — 2026-10-17
+
+- fix(deps): bootstrap 地板 v0.5.1 → v0.5.2（lifecycle 迁移版）
+
+## [nacos/v0.2.2] — 2026-10-17
+
+- fix(lifecycle): nns.go 迁移 logx/shutdown → core/lifecycle
+
+## [v0.5.2] — 2026-10-17
+
+- fix(lifecycle): 迁移 logx/shutdown（v0.5.0 起废弃）→ core/lifecycle.Manager——类型别名等价，仅 import 与构造符号替换；嵌套 nacos/obs 同步迁移；修复 CI staticcheck SA1019；go.mod 新增 core 直接依赖
+
+## [obs/v0.2.1] — 2026-10-17
+
+- fix(deps): 嵌套模块地板全量对齐最新——bootstrap v0.5.1、logx v0.5.0、metrics v0.1.6、tracing v0.2.1；go 维持 1.26.0（tracing/OTel 生态传导）
+
+## [nacos/v0.2.1] — 2026-10-17
+
+- fix(deps): 嵌套模块地板全量对齐最新——bootstrap v0.5.1、core v0.6.0、logx v0.5.0、nns v0.3.4、registry v0.3.1；go 维持 1.25.0（nacos-sdk 图要求）
+
+## [v0.5.1] — 2026-10-17
+
+- fix(deps): 内部依赖地板 concurrency v0.1.5 → v0.5.2、logx v0.1.9 → v0.5.0；go 最低版本降至 1.24.0（自然落点）
+
 ## [v0.5.0] — 2026-10-17
 
 仓库结构重置后的首个版本（历史与旧版本号 v0.1.0–v0.4.2 已清空重做，从 v0.5.0 起算）。

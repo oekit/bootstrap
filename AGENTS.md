@@ -1,10 +1,10 @@
 # AGENTS.md — oekit/bootstrap
 
-> bootstrap.Run 应用骨架（App ctx + AddResource + GoBackground）+ healthz 健康检查
-> 当前版本：`v0.5.0` · module：`github.com/oekit/bootstrap` · org：[oekit = Open Easy Kit](https://oekit.github.io)
+> 应用生命周期引导——bootstrap.Run 骨架 + healthz
+> 当前版本：`v0.5.1` · module：`github.com/oekit/bootstrap` · org：[oekit = Open Easy Kit](https://oekit.github.io)
 
 ## 本仓包含
-根包（bootstrap，import `github.com/oekit/bootstrap`）+ `healthz/` + `nacos/`（嵌套 module）+ `obs/`（嵌套 module）
+`./`、`healthz/`、`nacos/`、`obs/`
 
 ## 硬规则速览（全矩阵适用）
 
@@ -31,7 +31,7 @@
 
 ### 生命周期
 - 组件 Close 统一 `Close(ctx) error` 签名 + sync.Once 幂等
-- 应用骨架用 `github.com/oekit/bootstrap.Run`；**userFn 返回即服务结束，
+- 应用骨架用 `github.com/oekit/bootstrap/bootstrap.Run`；**userFn 返回即服务结束，
   长驻服务必须 `<-app.Context().Done()` 阻塞**
 
 ### Option 与命名

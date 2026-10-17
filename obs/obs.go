@@ -19,8 +19,8 @@ import (
 	"fmt"
 
 	"github.com/oekit/bootstrap"
+	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/logx"
-	"github.com/oekit/logx/shutdown"
 	"github.com/oekit/metrics"
 	"github.com/oekit/tracing"
 )
@@ -41,7 +41,7 @@ func (c *MetricsComponent) Name() string { return "metrics" }
 func (c *MetricsComponent) SetServiceName(name string) { c.ServiceName = name }
 
 // Init 注册 Prometheus 指标。
-func (c *MetricsComponent) Init(_ context.Context, _ *bootstrap.App, _ *shutdown.Manager) error {
+func (c *MetricsComponent) Init(_ context.Context, _ *bootstrap.App, _ *lifecycle.Manager) error {
 	metrics.Init(c.ServiceName)
 	logger.Info("metrics initialized")
 	return nil
@@ -56,7 +56,7 @@ type TracingComponent struct {
 func (c *TracingComponent) Name() string { return "tracing" }
 
 // Init 初始化 OpenTelemetry 追踪，并注册 shutdown 钩子。
-func (c *TracingComponent) Init(_ context.Context, _ *bootstrap.App, mgr *shutdown.Manager) error {
+func (c *TracingComponent) Init(_ context.Context, _ *bootstrap.App, mgr *lifecycle.Manager) error {
 	if c.Config.Endpoint == "" {
 		return nil
 	}

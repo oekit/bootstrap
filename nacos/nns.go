@@ -21,9 +21,9 @@ import (
 	"fmt"
 
 	"github.com/oekit/bootstrap"
+	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/core/version"
 	"github.com/oekit/logx"
-	"github.com/oekit/logx/shutdown"
 	nns "github.com/oekit/nns/nns"
 	nacospkg "github.com/oekit/registry/nacos"
 	"github.com/oekit/registry/registry"
@@ -48,7 +48,7 @@ type NNSComponent struct {
 func (c *NNSComponent) Name() string { return "nns" }
 
 // Init 初始化 NNS 客户端并注册服务实例。
-func (c *NNSComponent) Init(ctx context.Context, _ *bootstrap.App, mgr *shutdown.Manager) error {
+func (c *NNSComponent) Init(ctx context.Context, _ *bootstrap.App, mgr *lifecycle.Manager) error {
 	if c.NacosCfg.Addr == "" {
 		logger.Info("nacos addr empty, skipping NNS init")
 		return nil

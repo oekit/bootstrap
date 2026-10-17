@@ -4,13 +4,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oekit/logx/shutdown"
+	"github.com/oekit/core/lifecycle"
 )
 
 // TestApp_RequestShutdownCancelsContext 验证 RequestShutdown 取消根 context
 // （解除 userFn 对 Context().Done() 的阻塞）且幂等。
 func TestApp_RequestShutdownCancelsContext(t *testing.T) {
-	app := NewApp(shutdown.New(time.Second))
+	app := NewApp(lifecycle.New(time.Second))
 
 	app.RequestShutdown()
 
