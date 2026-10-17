@@ -24,9 +24,9 @@ import (
 	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/core/version"
 	"github.com/oekit/logx"
-	nns "github.com/oekit/nns/nns"
+	nns "github.com/oekit/nns"
+	"github.com/oekit/registry"
 	nacospkg "github.com/oekit/registry/nacos"
-	"github.com/oekit/registry/registry"
 )
 
 var logger = logx.Delegating("bootstrap-nacos")
@@ -47,14 +47,33 @@ type NNSComponent struct {
 // Name 返回组件名称。
 func (c *NNSComponent) Name() string { return "nns" }
 
-// Init 初始化 NNS 客户端并注册服务实例。
-func (c *NNSComponent) Init(ctx context.Context, _ *bootstrap.App, mgr *lifecycle.Manager) error {
+// nnsClient 是组件对 NNS 门面的最小依赖面（*nns.NNSClient 隐式满足），
+// 供测试替换（newNNSClient 缝）。
+type nnsClient interface {
+	Init(ctx context.Context, serviceName string, depServices []string) error
+	Register(ctx context.Context, port int, opts ...registry.RegisterOptionFunc) error
+	Deregister(ctx context.Context, port int, opts ...registry.RegisterOptionFunc) error
+	Close()
+}
+
+// newNNSClient 是 nns.New 的测试缝。
+var newNNSClient = func(cfg nacospkg.Bootstrap, opts ...nns.NNSOption) nnsClient {
+	return nns.New(cfg, opts...)
+}
+
+// Init 初始化 NNS 客户端；服务注册延迟到 app.Ready() 之后（nacos/v0.3.0 起，
+// 对齐 go-kratos「server 全部就绪 → Register；Stop 先 Deregister」语义）。
+//
+// 契约：userFn 必须在 server 就绪后调用 app.Ready()（推荐经 hertz/kitex
+// RunServer 的 WithOnReady），否则服务不会进入注册中心；Ready 永不触发时
+// 注册 goroutine 随应用关闭的 ctx 取消退出，不产生任何注册。
+func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecycle.Manager) error {
 	if c.NacosCfg.Addr == "" {
 		logger.Info("nacos addr empty, skipping NNS init")
 		return nil
 	}
 
-	nnsc := nns.New(c.NacosCfg, c.NSNOpts...)
+	nnsc := newNNSClient(c.NacosCfg, c.NSNOpts...)
 
 	if err := nnsc.Init(ctx, c.NacosCfg.ServiceName, c.DepServices); err != nil {
 		// 释放已创建的 naming/config 客户端（各带后台 goroutine），
@@ -69,17 +88,24 @@ func (c *NNSComponent) Init(ctx context.Context, _ *bootstrap.App, mgr *lifecycl
 	logger.Info("NNS initialized", "service", c.NacosCfg.ServiceName)
 
 	if c.Port > 0 {
-		if err := nnsc.Register(ctx, c.Port, registry.WithMetadata(version.Metadata())); err != nil {
-			logger.Error("NNS register failed — service will NOT be discoverable", "err", err)
-			// nns-client closer 要等注册成功后才注册，回滚（mgr.Shutdown）覆盖不到；
-			// 显式关闭释放 naming/config 客户端（对称 init 失败路径）
-			nnsc.Close()
-			return fmt.Errorf("nns register: %w", err)
-		}
-		mgr.Add("nns-deregister", func(ctx context.Context) error {
-			return nnsc.Deregister(ctx, c.Port)
-		}, 0)
-		logger.Info("registered", "service", c.NacosCfg.ServiceName, "port", c.Port)
+		app.GoBackground("nns-register", func(ctx context.Context) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-app.ReadyChan():
+			}
+			if err := nnsc.Register(ctx, c.Port, registry.WithMetadata(version.Metadata())); err != nil {
+				logger.Error("nns register failed (deferred) — service will NOT be discoverable", "err", err)
+				return
+			}
+			// 注册成功后才挂反注册。app.AddResource 落在 close 阶段且按注册
+			// 逆序释放：userFn 先注册 server 资源 → Ready → 此处后注册
+			// ⇒ 关停序为 nns-deregister → server.Shutdown（对齐 go-kratos Stop）。
+			app.AddResource("nns-deregister", func(ctx context.Context) error {
+				return nnsc.Deregister(ctx, c.Port)
+			})
+			logger.Info("registered (deferred)", "service", c.NacosCfg.ServiceName, "port", c.Port)
+		})
 	}
 
 	mgr.Add("nns-client", func(_ context.Context) error {
@@ -94,6 +120,10 @@ func (c *NNSComponent) Init(ctx context.Context, _ *bootstrap.App, mgr *lifecycl
 //
 // nacosCfg 是 Nacos 连接配置，port 是服务注册端口（0 则跳过注册），
 // depServices 是依赖服务列表，nnsOpts 传递给 nns.New。
+//
+// nacos/v0.3.0 起注册延迟到 app.Ready() 之后：userFn 须在 server 就绪后
+// 触发就绪门（推荐 hertz/kitex RunServer 的 WithOnReady），关停时反注册
+// 先于 server 关闭执行。
 func WithNNS(nacosCfg nacospkg.Bootstrap, port int, depServices []string, nnsOpts ...nns.NNSOption) bootstrap.BootstrapperOption {
 	return func(b *bootstrap.Bootstrapper) {
 		b.AddComponent(&NNSComponent{
