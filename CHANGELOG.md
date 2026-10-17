@@ -2,6 +2,14 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.5] — 2026-10-17
+
+- bootstrap v0.5.3 地板跟随
+
+## [nacos/v0.2.5] — 2026-10-17
+
+- bootstrap v0.5.3、nns v0.3.5 地板跟随
+
 ## [obs/v0.2.4] — 2026-10-17
 
 - concurrency 地板 v0.5.4
