@@ -15,6 +15,4 @@ jobs:
     uses: oekit/.github/.github/workflows/go-ci.yml@main
     with:
       go-version: '1.26'
-      additional-script: |-
-        cd nacos && go build ./... && go test -race -count=1 ./...
-        cd ../obs && go build ./... && go test -race -count=1 ./...
+      # 嵌套模块 nacos/obs 由共享 workflow 的 test-nested 自动发现并测试
