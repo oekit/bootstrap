@@ -10,10 +10,6 @@
 
 - fix(deps): bootstrap 地板 v0.5.1 → v0.5.2（lifecycle 迁移版）
 
-## [obs/v0.2.2] — 2026-10-17
-
-- fix(lifecycle): obs.go 迁移 logx/shutdown → core/lifecycle
-
 ## [nacos/v0.2.2] — 2026-10-17
 
 - fix(lifecycle): nns.go 迁移 logx/shutdown → core/lifecycle
