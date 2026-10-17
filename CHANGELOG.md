@@ -1,0 +1,38 @@
+# Changelog — oekit/bootstrap
+
+所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
+
+## [v0.5.0] — 2026-10-17
+
+仓库结构重置后的首个版本（历史与旧版本号 v0.1.0–v0.4.2 已清空重做，从 v0.5.0 起算）。
+
+### 目录结构
+
+```
+github.com/oekit/bootstrap                # package bootstrap（模块根）
+├── healthz/                              # package healthz — 健康检查
+├── nacos/                                # 嵌套 module github.com/oekit/bootstrap/nacos
+└── obs/                                  # 嵌套 module github.com/oekit/bootstrap/obs
+```
+
+- **核心包提升到模块根**：import 从 `github.com/oekit/bootstrap/bootstrap`
+  改为 `github.com/oekit/bootstrap`（包名仍为 `bootstrap`）
+- **healthz 路径同步**：`github.com/oekit/bootstrap/bootstrap/healthz`
+  → `github.com/oekit/bootstrap/healthz`
+- 嵌套 module `nacos` / `obs` 依赖改为 `require github.com/oekit/bootstrap v0.5.0`
+  + `replace => ../`（仓内联编；对外发布忽略 replace）
+
+### 能力面（结构重置保留）
+
+- `bootstrap.New(opts...)` / `Run(userFn)` — 应用骨架（App ctx + AddResource + GoBackground）
+- `NewApp(mgr)` — attach 模式（不接管信号/server，与宿主协作）
+- `ServiceNameAware` / `AddComponent` — 组件动态注入
+- `healthz` — 多 check 并发探测、总超时、panic 隔离
+- `nacos.WithNNS` / `obs.WithMetrics` — 嵌套 module 函数选项
+
+### 迁移（从旧路径）
+
+| 旧 | 新 |
+|---|---|
+| `github.com/oekit/bootstrap/bootstrap` | `github.com/oekit/bootstrap` |
+| `github.com/oekit/bootstrap/bootstrap/healthz` | `github.com/oekit/bootstrap/healthz` |
