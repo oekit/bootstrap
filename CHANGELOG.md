@@ -2,7 +2,7 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
-## [Unreleased]
+## [v0.5.4] — 2026-10-17
 
 - **feat(bootstrapper)**：`WithBeforeServe(fn func() error)`——组件初始化后、
   userFn 前的启动钩子（失败中止启动）。覆盖零断点重启的 listener fd 收养 /
