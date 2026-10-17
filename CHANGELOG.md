@@ -2,6 +2,18 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.2] — 2026-10-17
+
+- fix(lifecycle): obs.go 迁移 logx/shutdown → core/lifecycle
+
+## [nacos/v0.2.2] — 2026-10-17
+
+- fix(lifecycle): nns.go 迁移 logx/shutdown → core/lifecycle
+
+## [v0.5.2] — 2026-10-17
+
+- fix(lifecycle): 迁移 logx/shutdown（v0.5.0 起废弃）→ core/lifecycle.Manager——类型别名等价，仅 import 与构造符号替换；嵌套 nacos/obs 同步迁移；修复 CI staticcheck SA1019；go.mod 新增 core 直接依赖
+
 ## [obs/v0.2.1] — 2026-10-17
 
 - fix(deps): 嵌套模块地板全量对齐最新——bootstrap v0.5.1、logx v0.5.0、metrics v0.1.6、tracing v0.2.1；go 维持 1.26.0（tracing/OTel 生态传导）

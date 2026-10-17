@@ -8,7 +8,7 @@ package bootstrap
 import (
 	"context"
 
-	"github.com/oekit/logx/shutdown"
+	"github.com/oekit/core/lifecycle"
 )
 
 // Component 是可插拔的启动组件接口。
@@ -18,7 +18,7 @@ type Component interface {
 	// Name 返回组件标识，用于日志。
 	Name() string
 	// Init 执行组件初始化，可通过 app 和 mgr 注册资源和关闭钩子。
-	Init(ctx context.Context, app *App, mgr *shutdown.Manager) error
+	Init(ctx context.Context, app *App, mgr *lifecycle.Manager) error
 }
 
 // ShutdownHookComponent 通用关闭钩子组件，用于注册自定义资源释放逻辑。
@@ -35,8 +35,8 @@ func (c *ShutdownHookComponent) Name() string {
 	return c.ComponentName
 }
 
-// Init 将关闭钩子注册到 shutdown.Manager。
-func (c *ShutdownHookComponent) Init(_ context.Context, _ *App, mgr *shutdown.Manager) error {
+// Init 将关闭钩子注册到 lifecycle.Manager。
+func (c *ShutdownHookComponent) Init(_ context.Context, _ *App, mgr *lifecycle.Manager) error {
 	mgr.Add(c.Name(), c.Hook, 0)
 	return nil
 }

@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oekit/logx/shutdown"
+	"github.com/oekit/core/lifecycle"
 )
 
 // TestApp_Context_NotNil verifies the App exposes a non-nil context.
 func TestApp_Context_NotNil(t *testing.T) {
-	mgr := shutdown.New(100 * time.Millisecond)
+	mgr := lifecycle.New(100 * time.Millisecond)
 	app := NewApp(mgr)
 	if app.Context() == nil {
 		t.Fatal("expected non-nil context from App")
@@ -23,7 +23,7 @@ func TestApp_Context_NotNil(t *testing.T) {
 // TestApp_Context_CancelledOnShutdown verifies the app-lifecycle hook
 // cancels the App's context when shutdown is triggered.
 func TestApp_Context_CancelledOnShutdown(t *testing.T) {
-	mgr := shutdown.New(500 * time.Millisecond)
+	mgr := lifecycle.New(500 * time.Millisecond)
 	app := NewApp(mgr)
 
 	// Trigger shutdown — runs the three app-lifecycle jobs (cancel, close, wait).
@@ -36,7 +36,7 @@ func TestApp_Context_CancelledOnShutdown(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait briefly, then trigger shutdown. The hook should cancel
+	// Wait briefly, then trigger lifecycle. The hook should cancel
 	// app.ctx.
 	time.Sleep(20 * time.Millisecond)
 	go mgr.Shutdown(context.Background())
@@ -50,9 +50,9 @@ func TestApp_Context_CancelledOnShutdown(t *testing.T) {
 }
 
 // TestApp_AddResource_ClosesOnShutdown verifies AddResource registers
-// a closer that runs in reverse order on shutdown.
+// a closer that runs in reverse order on lifecycle.
 func TestApp_AddResource_ClosesOnShutdown(t *testing.T) {
-	mgr := shutdown.New(500 * time.Millisecond)
+	mgr := lifecycle.New(500 * time.Millisecond)
 	app := NewApp(mgr)
 
 	var (
@@ -84,7 +84,7 @@ func TestApp_AddResource_ClosesOnShutdown(t *testing.T) {
 // TestApp_AddResource_CloserError_DoesNotStopShutdown verifies that an
 // error from one closer doesn't stop subsequent closers from running.
 func TestApp_AddResource_CloserError_DoesNotStopShutdown(t *testing.T) {
-	mgr := shutdown.New(500 * time.Millisecond)
+	mgr := lifecycle.New(500 * time.Millisecond)
 	app := NewApp(mgr)
 
 	var ranSecond atomic.Bool
@@ -107,7 +107,7 @@ func TestApp_AddResource_CloserError_DoesNotStopShutdown(t *testing.T) {
 // launches a goroutine and that the goroutine exits when App.ctx is
 // cancelled.
 func TestApp_GoBackground_RunsAndExitsOnContextCancel(t *testing.T) {
-	mgr := shutdown.New(500 * time.Millisecond)
+	mgr := lifecycle.New(500 * time.Millisecond)
 	app := NewApp(mgr)
 
 	started := make(chan struct{})
@@ -140,7 +140,7 @@ func TestApp_GoBackground_RunsAndExitsOnContextCancel(t *testing.T) {
 // must not deadlock. The app-lifecycle hook calls closeAll before
 // wg.Wait, so the server's Shutdown triggers Run to return.
 func TestApp_GoBackground_ServerExitsOnResourceClose(t *testing.T) {
-	mgr := shutdown.New(500 * time.Millisecond)
+	mgr := lifecycle.New(500 * time.Millisecond)
 	app := NewApp(mgr)
 
 	// Simulate a server: blocks until shutdownFn is called.
@@ -169,7 +169,7 @@ func TestApp_GoBackground_ServerExitsOnResourceClose(t *testing.T) {
 // goroutine does not block shutdown indefinitely — the wait phase times
 // out and proceeds.
 func TestApp_GoBackground_DrainTimeout(t *testing.T) {
-	mgr := shutdown.New(500 * time.Millisecond)
+	mgr := lifecycle.New(500 * time.Millisecond)
 	app := NewApp(mgr)
 	app.SetWaitTimeout(100 * time.Millisecond) // short timeout for test
 
@@ -195,7 +195,7 @@ func TestApp_GoBackground_DrainTimeout(t *testing.T) {
 // when the shutdown context is cancelled, even if the drain timeout hasn't
 // fired. This covers the ctx.Done() branch in timedWait.
 func TestApp_GoBackground_DrainContextCancelled(t *testing.T) {
-	mgr := shutdown.New(500 * time.Millisecond)
+	mgr := lifecycle.New(500 * time.Millisecond)
 	app := NewApp(mgr)
 	app.SetWaitTimeout(10 * time.Second) // long timeout — won't fire
 
@@ -224,7 +224,7 @@ func TestApp_GoBackground_DrainContextCancelled(t *testing.T) {
 // TestApp_GoBackground_DrainContextCancelled_NoTimeout verifies the
 // timeout<=0 (infinite wait) path also respects context cancellation.
 func TestApp_GoBackground_DrainContextCancelled_NoTimeout(t *testing.T) {
-	mgr := shutdown.New(500 * time.Millisecond)
+	mgr := lifecycle.New(500 * time.Millisecond)
 	app := NewApp(mgr)
 	app.SetWaitTimeout(0) // infinite wait
 
@@ -253,7 +253,7 @@ func TestApp_GoBackground_DrainContextCancelled_NoTimeout(t *testing.T) {
 // goroutine does not crash the process. async.GoSafe is expected to
 // recover the panic.
 func TestApp_GoBackground_PanicRecovered(t *testing.T) {
-	mgr := shutdown.New(500 * time.Millisecond)
+	mgr := lifecycle.New(500 * time.Millisecond)
 	app := NewApp(mgr)
 
 	exited := make(chan struct{})
@@ -299,7 +299,7 @@ func TestShutdownHookComponent_Init_RegistersHook(t *testing.T) {
 			return nil
 		},
 	}
-	mgr := shutdown.New(500 * time.Millisecond)
+	mgr := lifecycle.New(500 * time.Millisecond)
 	if err := c.Init(context.Background(), nil, mgr); err != nil {
 		t.Fatalf("Init: %v", err)
 	}

@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/common/test/assert"
-	"github.com/oekit/logx/shutdown"
+	"github.com/oekit/core/lifecycle"
 )
 
 type mockComponent struct {
 	name      string
 	initErr   error
-	initFn    func(ctx context.Context, app *App, mgr *shutdown.Manager) error
+	initFn    func(ctx context.Context, app *App, mgr *lifecycle.Manager) error
 	mu        sync.Mutex
 	initCount int
 	initOrder int
@@ -27,7 +27,7 @@ var (
 
 func (m *mockComponent) Name() string { return m.name }
 
-func (m *mockComponent) Init(ctx context.Context, app *App, mgr *shutdown.Manager) error {
+func (m *mockComponent) Init(ctx context.Context, app *App, mgr *lifecycle.Manager) error {
 	m.mu.Lock()
 	m.initCount++
 	m.mu.Unlock()
@@ -156,7 +156,7 @@ func TestNew_WithShutdownHook(t *testing.T) {
 	}
 }
 
-var _ = shutdown.New
+var _ = lifecycle.New
 
 // TestNew_ComponentInitError_RollsBackEarlierComponents 回归测试（W1-T4）：
 // 后续组件 Init 失败时，必须执行已初始化组件注册的关闭钩子（回滚），
@@ -165,7 +165,7 @@ func TestNew_ComponentInitError_RollsBackEarlierComponents(t *testing.T) {
 	hookRan := false
 	first := &mockComponent{
 		name: "first",
-		initFn: func(_ context.Context, _ *App, mgr *shutdown.Manager) error {
+		initFn: func(_ context.Context, _ *App, mgr *lifecycle.Manager) error {
 			mgr.Add("first-cleanup", func(context.Context) error {
 				hookRan = true
 				return nil
@@ -197,7 +197,7 @@ func TestNew_ComponentInitPanic_ConvertedToError(t *testing.T) {
 	hookRan := false
 	first := &mockComponent{
 		name: "first",
-		initFn: func(_ context.Context, _ *App, mgr *shutdown.Manager) error {
+		initFn: func(_ context.Context, _ *App, mgr *lifecycle.Manager) error {
 			mgr.Add("first-cleanup", func(context.Context) error {
 				hookRan = true
 				return nil
@@ -207,7 +207,7 @@ func TestNew_ComponentInitPanic_ConvertedToError(t *testing.T) {
 	}
 	panicking := &mockComponent{
 		name: "panicking",
-		initFn: func(context.Context, *App, *shutdown.Manager) error {
+		initFn: func(context.Context, *App, *lifecycle.Manager) error {
 			panic("init exploded")
 		},
 	}

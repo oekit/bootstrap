@@ -8,4 +8,4 @@ require (
 	github.com/oekit/logx v0.5.0
 )
 
-require github.com/oekit/core v0.6.0 // indirect
+require github.com/oekit/core v0.6.0

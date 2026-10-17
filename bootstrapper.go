@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/oekit/concurrency/async"
+	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/logx"
-	"github.com/oekit/logx/shutdown"
 )
 
 var logger = logx.Delegating("bootstrap")
@@ -105,13 +105,13 @@ func New(opts ...BootstrapperOption) (*Bootstrapper, error) {
 // Run 启动服务，阻塞直到收到关闭信号或 userFn 返回。
 //
 // 执行顺序：
-//  1. 创建 shutdown.Manager 和 App
+//  1. 创建 lifecycle.Manager 和 App
 //  2. 按注册顺序初始化所有 Component
 //  3. 调用 userFn(app) 启动用户服务
 //  4. 监听 SIGINT/SIGTERM
 //  5. 优雅关闭
 func (b *Bootstrapper) Run(userFn func(*App) error) error {
-	mgr := shutdown.New(b.shutdownTimeout)
+	mgr := lifecycle.New(b.shutdownTimeout)
 	ctx := context.Background()
 
 	// 1. 创建 App（注册到 mgr）
@@ -169,7 +169,7 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 
 // safeInit 执行组件 Init 并隔离 panic：组件初始化 panic 转为 error，
 // 保证失败回滚路径得以执行（panic 会直接跳出 Run 的初始化循环）。
-func safeInit(c Component, ctx context.Context, app *App, mgr *shutdown.Manager) (err error) {
+func safeInit(c Component, ctx context.Context, app *App, mgr *lifecycle.Manager) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("component init panicked: %v", r)

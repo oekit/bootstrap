@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/oekit/concurrency/async"
-	"github.com/oekit/logx/shutdown"
+	"github.com/oekit/core/lifecycle"
 )
 
 // App 是应用生命周期管理器，统一管理资源注册、后台任务和优雅关闭。
@@ -19,7 +19,7 @@ import (
 //	// shutdown 时自动按注册逆序关闭所有资源和等待后台任务退出
 type App struct {
 	mu          sync.Mutex
-	mgr         *shutdown.Manager
+	mgr         *lifecycle.Manager
 	closers     []namedCloser
 	wg          sync.WaitGroup
 	cancel      context.CancelFunc
@@ -35,7 +35,7 @@ type namedCloser struct {
 // defaultWaitTimeout is the default drain timeout for GoBackground goroutines.
 const defaultWaitTimeout = 30 * time.Second
 
-// NewApp 创建应用生命周期管理器，挂到调用方传入的 shutdown.Manager 上（attach 模式）。
+// NewApp 创建应用生命周期管理器，挂到调用方传入的 lifecycle.Manager 上（attach 模式）。
 //
 // 契约：NewApp 只做生命周期编排，**不接管信号与 server**——不调用
 // signal.Notify、不调用 h.Spin/RunServer；SIGINT/SIGTERM 与服务启停
@@ -43,12 +43,12 @@ const defaultWaitTimeout = 30 * time.Second
 // mgr.Shutdown 即可。
 //
 // 四阶段顺序语义：NewApp 立即向 mgr 注册
-// app-lifecycle:{cancel,drain,close,wait} 四个 job；shutdown.Manager 按
+// app-lifecycle:{cancel,drain,close,wait} 四个 job；lifecycle.Manager 按
 // **注册顺序**执行，因此调用方在 NewApp **之前** mgr.Add 的任务先于四阶段执行，
 // 在 NewApp **之后** mgr.Add 的任务排在四阶段之后。应用自身资源请用
 // AddResource/GoBackground（分别落在 close / wait 阶段），不要在 NewApp 之后
 // 直接 mgr.Add（会排到 wait 之后，错过 close 窗口）。
-func NewApp(mgr *shutdown.Manager) *App {
+func NewApp(mgr *lifecycle.Manager) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &App{
 		mgr:         mgr,
@@ -103,7 +103,7 @@ func (a *App) GoBackground(name string, fn func(ctx context.Context)) {
 }
 
 // RequestShutdown 请求应用进入关闭流程：取消根 context，解除 userFn 中
-// `<-app.Context().Done()` 的阻塞，使其返回并触发 shutdown.Manager 的优雅
+// `<-app.Context().Done()` 的阻塞，使其返回并触发 lifecycle.Manager 的优雅
 // 关闭序列。幂等；在关闭序列中再次调用是安全的（cancel 本身幂等）。
 // 典型用途见 lifecycle.App.RequestShutdown。
 func (a *App) RequestShutdown() {
