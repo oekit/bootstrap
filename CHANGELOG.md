@@ -10,6 +10,14 @@
 
 - fix(deps): logx 地板 v0.5.0 → v0.6.0（零代码改动）；嵌套 nacos/obs 同步
 
+## [nacos/v0.3.2] — 2026-10-18
+
+- chore(deps): 父模块地板 bootstrap v0.6.1 → v0.6.2（audit 嵌套地板门禁首发抓漏，matrix-tools#6）
+
+## [obs/v0.2.7] — 2026-10-18
+
+- chore(deps): 父模块地板 bootstrap v0.6.1 → v0.6.2（audit 嵌套地板门禁首发抓漏，matrix-tools#6）
+
 ## [nacos/v0.3.1] — 2026-10-18
 
 - chore(deps): 全部 oekit 依赖地板对齐最新
