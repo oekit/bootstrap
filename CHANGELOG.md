@@ -2,9 +2,25 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
-## [- docs(healthz): 包文档示例签名修正——Handle(ctx) 传参 + c.Data 直写（#4：RequestContext 恰好实现 context.Context 传 c 能编译但超时语义错；c.JSON 会双重编码 body）
+## [v0.6.2] — 2026-10-18
 
-## [- fix(deps): logx 地板 v0.5.0 → v0.6.0（零代码改动）
+- docs(healthz): 包文档示例签名修正——Handle(ctx) 传参 + c.Data 直写（[#4](https://github.com/oekit/bootstrap/issues/4)：RequestContext 恰好实现 context.Context 传 c 能编译但超时语义错；c.JSON 会双重编码 body）
+
+## [v0.6.1] — 2026-10-18
+
+- fix(deps): logx 地板 v0.5.0 → v0.6.0（零代码改动）；嵌套 nacos/obs 同步
+
+## [nacos/v0.3.1] — 2026-10-18
+
+- chore(deps): 全部 oekit 依赖地板对齐最新
+
+## [obs/v0.2.6] — 2026-10-18
+
+- chore(deps): 全部 oekit 依赖地板对齐最新
+
+## [nacos/v0.3.0] — 2026-10-17
+
+- **feat!**：`WithNNS` 注册延迟到 `App.Ready()` 之后——修复「注册先于 server 监听、反注册后于 server 关闭」双序错误，关停序 nns-deregister → server.Shutdown 对齐 kratos Stop
 
 ## [v0.6.0] — 2026-10-17
 
