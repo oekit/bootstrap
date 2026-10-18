@@ -1,7 +1,7 @@
 # AGENTS.md — oekit/bootstrap
 
 > 应用生命周期引导——bootstrap.Run 骨架 + healthz
-> 当前版本：`v0.5.1` · module：`github.com/oekit/bootstrap` · org：[oekit = Open Easy Kit](https://oekit.github.io)
+> 当前版本：`v0.6.2` · module：`github.com/oekit/bootstrap` · org：[oekit = Open Easy Kit](https://oekit.github.io)
 
 ## 本仓包含
 `./`、`healthz/`、`nacos/`、`obs/`
