@@ -2,6 +2,14 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [nacos/v0.3.4] — 2026-10-20
+
+- Go 最低版本地板 1.25.0 → 1.24.0（#33）：12 个 indirect pin 同步降级到 nns/registry 已在用的 ≤1.24 组合（otel v1.41.0、grpc v1.80.0、client_golang v1.23.2、x/crypto v0.48.0 等）；实测 tidy 保持 1.24.0（未被依赖顶回），真实 go1.24.0 工具链下 build+vet+test 全绿
+
+## [v0.6.4] — 2026-10-20
+
+- Go 最低版本地板 1.25.0 → 1.24.0（#33）：12 个 indirect pin 同步降级到 nns/registry 已在用的 ≤1.24 组合（otel v1.41.0、grpc v1.80.0、client_golang v1.23.2、x/crypto v0.48.0 等）；实测 tidy 保持 1.24.0（未被依赖顶回），真实 go1.24.0 工具链下 build+vet+test 全绿
+
 ## [obs/v0.2.8] — 2026-10-19
 
 - build: 跟随 bootstrap v0.6.3 发版（父模块地板 v0.6.2 → v0.6.3）
