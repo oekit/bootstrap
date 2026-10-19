@@ -2,6 +2,14 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.8] — 2026-10-19
+
+- build: 跟随 bootstrap v0.6.3 发版（父模块地板 v0.6.2 → v0.6.3）
+
+## [nacos/v0.3.3] — 2026-10-19
+
+- build: 跟随 bootstrap v0.6.3 发版（父模块地板 v0.6.2 → v0.6.3）
+
 ## [v0.6.3] — 2026-10-19
 
 - build: 矩阵内依赖地板对齐（align_floors 不动点）：concurrency v0.5.4 → v0.17.0、logx v0.6.0 → v0.7.0
