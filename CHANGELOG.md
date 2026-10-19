@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.6.3] — 2026-10-19
+
+- build: 矩阵内依赖地板对齐（align_floors 不动点）：concurrency v0.5.4 → v0.17.0、logx v0.6.0 → v0.7.0
+
 ## [v0.6.2] — 2026-10-18
 
 - docs(healthz): 包文档示例签名修正——Handle(ctx) 传参 + c.Data 直写（[#4](https://github.com/oekit/bootstrap/issues/4)：RequestContext 恰好实现 context.Context 传 c 能编译但超时语义错；c.JSON 会双重编码 body）
