@@ -127,9 +127,12 @@ func New(opts ...BootstrapperOption) (*Bootstrapper, error) {
 // Run 启动服务，阻塞直到收到关闭信号或 userFn 返回。
 //
 // 执行顺序：
+//
 //  1. 创建 lifecycle.Manager 和 App
+//
 //  2. 按注册顺序初始化所有 Component
 //     2.5 BeforeServe 钩子（引擎启动前的定制准备）
+//
 //  3. 调用 userFn(app) 启动用户服务——server 就绪后应调用 app.Ready()
 //     触发就绪门：延迟注册型组件（如 bootstrap/nacos 的 NNS 组件，
 //     nacos/v0.3.0 起）在收到就绪信号后才注册，且关停时反注册先于
@@ -140,7 +143,9 @@ func New(opts ...BootstrapperOption) (*Bootstrapper, error) {
 //     胶水触发；自建启动骨架（直接 h.Spin()）必须自己调。漏接时
 //     bootstrap/nacos 的就绪门看门狗会在超时后打 ERROR 日志点明此事，
 //     并可用 nacos 组件的 RegistrationState() 查询注册状态。
+//
 //  4. 监听 SIGINT/SIGTERM
+//
 //  5. 优雅关闭
 func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	mgr := lifecycle.New(b.shutdownTimeout)
