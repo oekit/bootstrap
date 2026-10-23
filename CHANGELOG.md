@@ -2,6 +2,14 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [nacos/v0.3.6] — 2026-10-24
+
+- feat(nacos): 就绪门漏接的可观测性——看门狗超时打 ERROR 点明「服务不会注册到注册中心」（WithReadyTimeout 可调）+ NNSComponent.RegistrationState() 暴露注册阶段（#33）
+
+## [v0.6.5] — 2026-10-24
+
+- feat(nacos): 就绪门漏接的可观测性——看门狗超时打 ERROR 点明「服务不会注册到注册中心」（WithReadyTimeout 可调）+ NNSComponent.RegistrationState() 暴露注册阶段（#33）
+
 ## [nacos/v0.3.5] — 2026-10-20
 
 - build: 父模块依赖地板 v0.6.3 → v0.6.4（跟随 bootstrap v0.6.4；父模块地板不得落后最新 tag）
