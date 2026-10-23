@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [nacos/v0.3.7] — 2026-10-24
+
+- build: 父模块依赖地板 v0.6.4 → v0.6.5（跟随 bootstrap v0.6.5；父模块地板不得落后最新 tag）
+
 ## [obs/v0.2.10] — 2026-10-24
 
 - build: 父模块依赖地板 v0.6.4 → v0.6.5（跟随 bootstrap v0.6.5；父模块地板不得落后最新 tag）
