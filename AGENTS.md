@@ -1,6 +1,6 @@
 # AGENTS.md — oekit/bootstrap
 
-> 应用生命周期引导——New(WithServiceName/WithShutdownTimeout/WithBeforeServe) + Run(fn) + healthz；App.Ready/ReadyChan/IsReady 就绪门（幂等并发安全）——嵌套 bootstrap/nacos 自 v0.3.0 起 NNS 注册延迟到 Ready 之后（server 就绪 → userFn 触发 Ready → 才进注册中心）、关停序 nns 反注册先于 server 关闭；Metrics/Tracing 在嵌套模块 bootstrap/obs
+> 应用生命周期引导——New(WithServiceName/WithShutdownTimeout/WithBeforeServe) + Run(fn) + healthz；App.Ready/ReadyChan/IsReady 就绪门（幂等并发安全）——嵌套 bootstrap/nacos 自 v0.3.0 起 NNS 注册延迟到 Ready 之后（server 就绪 → userFn 触发 Ready → 才进注册中心）、关停序 nns 反注册先于 server 关闭；就绪门漏接时可观测——nacos 看门狗超时打 ERROR 点明「服务不会注册到注册中心」（WithReadyTimeout 可调）+ NNSComponent.RegistrationState() 暴露注册阶段（pending/registered/failed/skipped/shutdown）；Metrics/Tracing 在嵌套模块 bootstrap/obs
 > 当前版本：`v0.6.5` · module：`github.com/oekit/bootstrap` · org：[oekit = Open Easy Kit](https://oekit.github.io)
 
 ## 本仓包含
