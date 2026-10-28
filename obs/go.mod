@@ -4,10 +4,10 @@ go 1.26.0
 
 require (
 	github.com/oekit/bootstrap v0.6.5
-	github.com/oekit/core v0.9.2
-	github.com/oekit/logx v0.7.0
-	github.com/oekit/metrics v0.1.8
-	github.com/oekit/tracing v0.2.3
+	github.com/oekit/core v0.12.0
+	github.com/oekit/logx v0.7.1
+	github.com/oekit/metrics v0.1.9
+	github.com/oekit/tracing v0.3.0
 )
 
 require (
@@ -30,8 +30,10 @@ require (
 	go.opentelemetry.io/contrib/propagators/ot v1.47.0 // indirect
 	go.opentelemetry.io/otel v1.47.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.47.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.47.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.47.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.47.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.47.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.47.0 // indirect
