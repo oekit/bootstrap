@@ -10,3 +10,23 @@ updates:
       all-deps:
         patterns:
           - "*"
+  # 嵌套多模块仓：根模块 + 每个嵌套模块各一个 directory 条目。
+  # **不登记 ⇒ 该嵌套模块的依赖永远不会被提议升级，且没有任何报错**（#118）。
+  # 2026-10-28 实测：本仓曾漏登记 /nacos、/obs ⇒ 共 130 项间接依赖被静默冻结
+  # （形态是「直接依赖都是最新、落后全在间接依赖」⇒ 冻结落在下游的构建产物上）。
+  - package-ecosystem: gomod
+    directory: /nacos
+    schedule:
+      interval: weekly
+    groups:
+      all-deps:
+        patterns:
+          - "*"
+  - package-ecosystem: gomod
+    directory: /obs
+    schedule:
+      interval: weekly
+    groups:
+      all-deps:
+        patterns:
+          - "*"
