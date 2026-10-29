@@ -8,7 +8,7 @@
 ## 安装
 
 ```bash
-go get github.com/oekit/bootstrap@v0.6.5
+go get github.com/oekit/bootstrap@v0.6.6
 ```
 
 ## 这个仓库做什么
