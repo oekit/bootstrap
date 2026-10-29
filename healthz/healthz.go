@@ -31,6 +31,7 @@ package healthz
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -138,12 +139,16 @@ func Handle(ctx context.Context) (int, string) {
 	// 排序让输出稳定(便于日志 diff)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
 
-	// 总超时同时注入 check ctx(deadline 感知的依赖能提前中止)
+	// 总超时同时注入 check ctx(deadline 感知的依赖能提前中止)。
+	//
+	// **用 WithTimeoutCause 而非 WithTimeout**：cause 是「这次超时是**我们**
+	// 设的总超时掐断的」这一事实的权威凭据。collect 侧据此判定一个
+	// DeadlineExceeded 到底该记成「总超时」还是「check 自己的错」。
 	runCtx := ctx
 	timeout := time.Duration(checkTimeoutNanos.Load())
 	if timeout > 0 {
 		var cancel context.CancelFunc
-		runCtx, cancel = context.WithTimeout(ctx, timeout)
+		runCtx, cancel = context.WithTimeoutCause(ctx, timeout, errTotalTimeout)
 		defer cancel()
 	}
 
@@ -176,7 +181,7 @@ collect:
 		case r := <-ch:
 			returned[r.name] = true
 			if r.err != nil {
-				failures[r.name] = r.err.Error()
+				failures[r.name] = failureText(r.err, runCtx, timeout)
 			}
 		case <-deadline:
 			break collect
@@ -198,6 +203,34 @@ collect:
 	}
 	body, _ := json.Marshal(Result{Status: "ok"})
 	return 200, string(body)
+}
+
+// errTotalTimeout 是「本次 Handle 的总超时到点」的 cause 标记。
+// 见 failureText 的说明：它是「这次超时由我们掐断」的权威凭据。
+var errTotalTimeout = errors.New("healthz total timeout")
+
+// failureText 把 check 返回的 error 归一成对外文案。
+//
+// **为什么需要归一（2026-10-29 修）**：一个「挂死但 ctx-aware」的 check 在
+// 总超时到点时，其 ctx 会被 cancel，它返回的 err 就是 context.DeadlineExceeded
+// （对外文案 "context deadline exceeded"）。而 collect 侧的定时器也在**同一
+// 时刻**到期——于是「谁先被 select 选中」决定了这同一次超时被记成
+// "check timeout after 50ms" 还是 "context deadline exceeded"。
+//
+// 后果是同一份代码在不同机器/负载下产出**不同的 body**：CI 上偶发红
+// （bootstrap#48：body = {"slow":"context deadline exceeded"}，
+// 而测试要求 "check timeout"），本地却恒绿。文档承诺的是「超时的 check
+// 统一记 check timeout」——那就必须有唯一判据，不能让两个定时器赛跑。
+//
+// **判据不能是「error 长什么样」**：check 内部自己的依赖超时（DB 层抛的
+// context.DeadlineExceeded）与本次总超时是两回事，前者该原样上报。
+// 因此判据取「**是 cause 里的那个总超时标记**」——只有 runCtx 被
+// errTotalTimeout 掐断时，DeadlineExceeded 才归一为总超时文案。
+func failureText(err error, runCtx context.Context, timeout time.Duration) string {
+	if errors.Is(err, context.DeadlineExceeded) && errors.Is(context.Cause(runCtx), errTotalTimeout) {
+		return fmt.Sprintf("check timeout after %s", timeout)
+	}
+	return err.Error()
 }
 
 // safeRun 调 check 捕获 panic(健康检查不应让中间件崩溃)。
