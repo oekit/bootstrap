@@ -2,6 +2,14 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.11] — 2026-10-30
+
+- build: 矩阵内依赖地板 `tracing` v0.3.1 → v0.3.2（嵌套模块 obs 跟随；本版不含 API 变更）
+
+## [v0.6.6] — 2026-10-30
+
+- build: 矩阵内依赖地板 `tracing` v0.3.1 → v0.3.2（嵌套模块 obs 跟随；本版不含 API 变更）
+
 ## [nacos/v0.3.7] — 2026-10-24
 
 - build: 父模块依赖地板 v0.6.4 → v0.6.5（跟随 bootstrap v0.6.5；父模块地板不得落后最新 tag）
