@@ -7,7 +7,7 @@ require (
 	github.com/oekit/core v0.12.1
 	github.com/oekit/logx v0.8.0
 	github.com/oekit/metrics v0.1.10
-	github.com/oekit/tracing v0.3.1
+	github.com/oekit/tracing v0.3.2
 )
 
 require (
