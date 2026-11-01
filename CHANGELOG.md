@@ -2,6 +2,18 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.12] — 2026-11-01
+
+- build: 矩阵内依赖地板 `nns` v0.5.4 → v0.5.5（嵌套模块 nacos 跟随；本版不含 API 变更）
+
+## [nacos/v0.3.8] — 2026-11-01
+
+- build: 矩阵内依赖地板 `nns` v0.5.4 → v0.5.5（嵌套模块 nacos 跟随；本版不含 API 变更）
+
+## [v0.6.7] — 2026-11-01
+
+- build: 矩阵内依赖地板 `nns` v0.5.4 → v0.5.5（嵌套模块 nacos 跟随；本版不含 API 变更）
+
 ## [obs/v0.2.11] — 2026-10-30
 
 - build: 矩阵内依赖地板 `tracing` v0.3.1 → v0.3.2（嵌套模块 obs 跟随；本版不含 API 变更）
