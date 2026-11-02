@@ -13,10 +13,12 @@
 ## [v0.3.7] — 2026-10-24
 
 - 跟随 bootstrap  发版（release_train 嵌套 train）
+- 补记：nacos 就绪门漏接的可观测性（看门狗超时告警 + RegistrationState）已在 nacos/v0.3.6 节首发，本版未再改动（#33）
 
 ## [v0.3.6] — 2026-10-24
 
 - 跟随 bootstrap v0.6.5 发版（release_train 嵌套 train）
+- feat(nacos): 就绪门漏接的可观测性（#33）——看门狗超时打 ERROR 点明「服务不会注册到注册中心」（WithReadyTimeout 可调）+ NNSComponent.RegistrationState() 暴露注册阶段
 
 ## [v0.3.5] — 2026-10-20
 
