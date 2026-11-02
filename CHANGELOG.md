@@ -191,7 +191,7 @@ github.com/oekit/bootstrap                # package bootstrap（模块根）
 ### 能力面（结构重置保留）
 
 - `bootstrap.New(opts...)` / `Run(userFn)` — 应用骨架（App ctx + AddResource + GoBackground）
-- `NewApp(mgr)` — attach 模式（不接管信号/server，与宿主协作）
+- `NewApp(mgr)` — attach 模式（不接管信号/server，与宿主协作）（#1）
 - `ServiceNameAware` / `AddComponent` — 组件动态注入
 - `healthz` — 多 check 并发探测、总超时、panic 隔离
 - `nacos.WithNNS` / `obs.WithMetrics` — 嵌套 module 函数选项
