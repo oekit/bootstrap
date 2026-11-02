@@ -2,6 +2,18 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.14] — 2026-11-03
+
+- build: 把父仓 bootstrap v0.6.8 与 logx v0.8.2、registry v0.5.3、registry/nacos v0.1.3、registry/nacosimpl v0.1.4 的地板带进已发布产物（bootstrap/nacos、bootstrap/obs 原快照嵌的是更旧的父仓与跨仓地板，消费方拿不到最新内容）（bootstrap#70）
+
+关联问题单：bootstrap#70。
+
+## [nacos/v0.3.10] — 2026-11-03
+
+- build: 把父仓 bootstrap v0.6.8 与 logx v0.8.2、registry v0.5.3、registry/nacos v0.1.3、registry/nacosimpl v0.1.4 的地板带进已发布产物（bootstrap/nacos、bootstrap/obs 原快照嵌的是更旧的父仓与跨仓地板，消费方拿不到最新内容）（bootstrap#70）
+
+关联问题单：bootstrap#70。
+
 ## [obs/v0.2.13] — 2026-11-02
 
 - 抬嵌套模块地板 github.com/oekit/registry/nacosimpl v0.1.0 → v0.1.1（oekit/oekit#104）
