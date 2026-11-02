@@ -2,6 +2,18 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.13] — 2026-11-02
+
+- 抬嵌套模块地板 github.com/oekit/registry/nacosimpl v0.1.0 → v0.1.1（oekit/oekit#104）
+
+## [nacos/v0.3.9] — 2026-11-02
+
+- 抬嵌套模块地板 github.com/oekit/registry/nacosimpl v0.1.0 → v0.1.1（oekit/oekit#104）
+
+## [v0.6.8] — 2026-11-02
+
+- 抬嵌套模块地板 github.com/oekit/registry/nacosimpl v0.1.0 → v0.1.1（oekit/oekit#104）
+
 ## [obs/v0.2.12] — 2026-11-01
 
 - build: 矩阵内依赖地板 `nns` v0.5.4 → v0.5.5（嵌套模块 nacos 跟随；本版不含 API 变更）

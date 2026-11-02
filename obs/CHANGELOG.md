@@ -2,6 +2,10 @@
 
 由 oekit/bootstrap v0.3.0 拆分而来。
 
+## [v0.2.13] — 2026-11-02
+
+- 跟随 bootstrap v0.6.8 发版（release_train 嵌套 train）
+
 ## [v0.2.12] — 2026-11-01
 
 - 跟随 bootstrap v0.6.7 发版（release_train 嵌套 train）
