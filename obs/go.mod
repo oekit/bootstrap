@@ -6,7 +6,7 @@ require (
 	github.com/oekit/bootstrap v0.6.8
 	github.com/oekit/core v0.12.1
 	github.com/oekit/logx v0.8.2
-	github.com/oekit/metrics v0.1.10
+	github.com/oekit/metrics v0.1.11
 	github.com/oekit/tracing v0.3.2
 )
 
@@ -19,7 +19,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/oekit/concurrency v0.23.3 // indirect
+	github.com/oekit/concurrency v0.23.4 // indirect
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
