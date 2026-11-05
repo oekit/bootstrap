@@ -2,6 +2,10 @@
 
 由 oekit/bootstrap v0.3.0 拆分而来。
 
+## [v0.3.13] — 2026-11-06
+
+- 跟随 bootstrap v0.6.9 发版（release_train 嵌套 train）
+
 ## [v0.3.12] — 2026-11-06
 
 - 跟随补记发版（本版无代码变更）：v0.3.11 的 CHANGELOG 段因发版流程事故未随 tag 快照落盘（tag 快照缺本版段，matrix-tools#234 新门禁当场判出）；v0.3.12 快照起恢复「tag 必须落在 CHANGELOG 提交之后」的纪律，内容见下一条
