@@ -14,6 +14,10 @@
 //	err := b.Run(userFn)
 //
 // 强依赖场景（初始化失败即启动失败）使用 WithRequiredNNS。
+//
+// 就绪门 fail-fast（#74）：裸 h.Spin() 起服务（不经 RunServer WithOnReady）
+// 的消费方永远不会触发 app.Ready() ⇒ 服务静默永不注册。集群部署下用
+// WithReadyFatal 把「30s 只告警」升级为「超时中止启动」。
 package nacos
 
 import (
@@ -47,9 +51,19 @@ const defaultReadyTimeout = 30 * time.Second
 // 之前/之中完成，故选项书写顺序不影响最终取值。
 var readyTimeoutNanos atomic.Int64
 
+// readyFatal 存放 ReadyFatal 全局缺省（WithReadyFatal 写入，组件 Init 读取）。
+// WithNNS 组件未显式设置 ReadyFatal 字段时以此为准——与 readyTimeoutNanos
+// 同一款「选项写、Init 读」的时序保证。
+var readyFatal atomic.Bool
+
 func init() {
 	readyTimeoutNanos.Store(int64(defaultReadyTimeout))
 }
+
+// errReadyFatal 是 ReadyFatal 看门狗超时的哨兵错误（errors.Is 可辨）：
+// 中止启动的启动失败原因「就绪门漏接（app.Ready() 未被调用）」。
+var errReadyFatal = fmt.Errorf("nns: app.Ready() not called within ReadyTimeout (fail-fast enabled; " +
+	"裸 h.Spin() 起服务的消费方必须显式调用 app.Ready()，或改用 hertz/kitex RunServer 的 WithOnReady)")
 
 // NNSComponent NNS 服务治理组件，负责 NNS 客户端初始化和服务注册。
 // （自 bootstrap 根包迁移，行为不变。）
@@ -66,6 +80,12 @@ type NNSComponent struct {
 	// 就绪则打 ERROR 日志（点明漏接就绪门 ⇒ 服务不会注册到注册中心）。
 	// 零值取默认 30s；负值表示关闭看门狗（恢复旧行为：静默等待）。
 	ReadyTimeout time.Duration
+	// ReadyFatal 为 true 时，就绪门看门狗超时**中止启动**而非只告警（#74）：
+	// 裸 h.Spin() 消费方（不经 hertz.RunServer）永远不会触发 app.Ready()，
+	// 服务静默永不注册——注册中心缺失在集群部署下等于服务不存在，早死优于
+	// 带日志的静默降级。缺省 false（告警后继续等就绪、慢启动不误杀，#33 语义
+	// 不变）；经 WithReadyFatal 显式开启。
+	ReadyFatal bool
 
 	// registerState 记录注册流程状态，供 RegistrationState 查询。
 	registerState atomic.Pointer[RegisterState]
@@ -193,6 +213,7 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 			if timeout == 0 {
 				timeout = time.Duration(readyTimeoutNanos.Load())
 			}
+			fatal := c.ReadyFatal || readyFatal.Load() // 组件字段优先级高于全局缺省（#74）
 			var timer *time.Timer
 			var timeoutCh <-chan time.Time
 			if timeout > 0 {
@@ -212,6 +233,25 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 					"check that userFn calls app.Ready() after server starts (hertz/kitex RunServer WithOnReady)",
 					"timeout", timeout.String(), "service", c.NacosCfg.ServiceName)
 				c.markReadyWaitExceeded()
+				// ReadyFatal（#74）：fail-fast 中止启动。裸 h.Spin() 消费方
+				// 永远不会触发 app.Ready() ⇒ 静默永不注册——「用了 Nacos 但
+				// 服务没进注册中心」的故障排查时不会先想到启动日志里一条 30s
+				// 前的 ERROR，注册中心缺失等于服务不存在，早死优于静默降级。
+				// 出口是 RequestShutdown：取消根 ctx 让 userFn 解除阻塞、走
+				// 优雅关闭——启动语境下即「中止启动」；RegistrationState 落
+				// PhaseFailed + errReadyFatal 哨兵，失败原因 errors.Is 可辨。
+				if fatal {
+					c.setRegisterState(&RegisterState{
+						Phase:             PhaseFailed,
+						Service:           c.NacosCfg.ServiceName,
+						Port:              c.Port,
+						Err:               errReadyFatal,
+						Since:             time.Now(),
+						ReadyWaitExceeded: true,
+					})
+					app.RequestShutdown()
+					return
+				}
 				// 超时后继续等就绪信号：慢启动不应被误判为失败，
 				// 就绪后仍照常注册（只是已经告警过）。
 				select {
@@ -335,6 +375,25 @@ func WithNNS(nacosCfg nacospkg.Bootstrap, port int, depServices []string, nnsOpt
 func WithReadyTimeout(d time.Duration) bootstrap.BootstrapperOption {
 	return func(b *bootstrap.Bootstrapper) {
 		readyTimeoutNanos.Store(int64(d))
+	}
+}
+
+// WithReadyFatal 开启就绪门看门狗的 fail-fast（#74）：等待 app.Ready() 超时
+// 后**中止启动**（返回 errors.Is 可辨的哨兵错误），而非只打一条 ERROR 继续
+// 跑——后者是「带日志的静默降级」：服务照常起、但永远没进注册中心，集群
+// 部署下等于服务不存在，故障排查时不会先想到去看启动日志里一条 30 秒前的
+// ERROR。注册中心缺失在集群部署下应早死。
+//
+// 适用形态：
+//   - 集群部署（Nacos 是服务发现的唯一事实源，注册缺失=不可用）；
+//   - 裸 h.Spin()/kitex 起服务、无 RunServer WithOnReady 接就绪门的消费方
+//     （正是「静默永不注册」的高危形态，见 #74 的下游活案例）。
+//
+// 不适合：本地开发（Nacos 常不可达）、注册为纯软增强的服务（有其他发现路径）。
+// 用法同 WithReadyTimeout：须在 WithNNS/WithRequiredNNS 之前应用。
+func WithReadyFatal() bootstrap.BootstrapperOption {
+	return func(b *bootstrap.Bootstrapper) {
+		readyFatal.Store(true)
 	}
 }
 
