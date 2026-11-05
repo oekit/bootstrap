@@ -2,6 +2,18 @@
 
 由 oekit/bootstrap v0.3.0 拆分而来。
 
+## [v0.3.12] — 2026-11-06
+
+- 跟随补记发版（本版无代码变更）：v0.3.11 的 CHANGELOG 段因发版流程事故未随 tag 快照落盘（tag 快照缺本版段，matrix-tools#234 新门禁当场判出）；v0.3.12 快照起恢复「tag 必须落在 CHANGELOG 提交之后」的纪律，内容见下一条
+
+关联问题单：bootstrap#74、matrix-tools#234。
+
+## [v0.3.11] — 2026-11-06
+
+- feat(nacos): 新增 `WithReadyFatal()` 就绪门看门狗 fail-fast（[bootstrap#74](https://github.com/oekit/bootstrap/issues/74)）——`WithNNS` 的服务注册延迟到 `app.Ready()` 之后；裸 `h.Spin()` 起服务（不经 hertz/kitex RunServer）的消费方**永远不会触发 Ready**——服务静默永不注册，唯一信号是 30s 看门狗一条 ERROR（bootstrap#33），之后服务照常运行——「注册缺失」是**带日志的静默降级**，排查时不会先想到去看启动日志里一条 30 秒前的 ERROR（下游活案例：bianque main.go 用 WithNNS 但裸 Spin，全仓非测试代码零 app.Ready() 调用）。修法：`WithReadyFatal()`（全局选项，与 WithReadyTimeout 同款「选项写、Init 读」包级 atomic）或组件字段 `NNSComponent.ReadyFatal`——看门狗超时后 RegistrationState 落 PhaseFailed + `errReadyFatal` 哨兵（errors.Is 可辨，错误文案直接点名裸 Spin 消费方的两条出路）并 `app.RequestShutdown()` 中止启动——注册中心缺失在集群部署下等于服务不存在，早死优于静默。缺省 false：告警后继续等就绪、慢启动不误杀（#33 语义零破坏）——本地开发/注册为软增强的服务不受影响
+
+关联问题单：bootstrap#74。
+
 ## [v0.3.10] — 2026-11-03
 
 - 随本次 train 一并发布（只发嵌套模块，父模块本次不发版）（bootstrap#70）
