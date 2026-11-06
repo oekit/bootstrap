@@ -1,9 +1,9 @@
 package bootstrap
 
 import (
-	"fmt"
-	"errors"
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
