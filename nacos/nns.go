@@ -364,8 +364,15 @@ func WithNNS(nacosCfg nacospkg.Bootstrap, port int, depServices []string, nnsOpt
 // 等待 app.Ready() 超过该时长仍未就绪，则打 ERROR 日志点明「服务不会注册到
 // 注册中心」。传负值关闭看门狗（恢复静默等待的旧行为）。
 //
-// 用法（须在 WithNNS/WithRequiredNNS 之前应用，作用于同一 Bootstrapper
-// 内随后加入的 NNS 组件）：
+// ⚠️ 作用域是**进程级全局**（#76）：写入包级 atomic，此后本进程内**所有**
+// NNS 组件（任何 Bootstrapper）在 Init 时读取——与函数选项的常规直觉相反，
+// 且顺序无关、后写覆盖先写。同进程跑多个 Bootstrapper 的场景（测试/宿主进程）
+// 会互相覆盖：需要 per-Bootstrapper 作用域时不要用本选项，改用组件字段
+// NNSComponent.ReadyTimeout（显式构造组件 + Bootstrapper.AddComponent）。
+// 文档曾宣称「须在 WithNNS 之前应用、仅作用于同一 Bootstrapper 随后加入的
+// 组件」——与实现不符，已按真实行为修正（本条注释即权威）。
+//
+// 用法（单 Bootstrapper 进程，书写顺序无关）：
 //
 //	b, _ := bootstrap.New(
 //	    bootstrap.WithServiceName("my-service"),

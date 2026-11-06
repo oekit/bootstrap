@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"fmt"
+	"errors"
 	"context"
 	"sync"
 	"sync/atomic"
@@ -74,8 +76,7 @@ func NewApp(mgr *lifecycle.Manager) *App {
 		return nil
 	}, 0)
 	mgr.Add("app-lifecycle:close", func(ctx context.Context) error {
-		a.closeAll(ctx)
-		return nil
+		return a.closeAll(ctx) // #80：错误进 shutdownErrs，经 Run 上抛
 	}, 0)
 	mgr.Add("app-lifecycle:wait", func(ctx context.Context) error {
 		a.timedWait(ctx)
@@ -180,15 +181,23 @@ func (a *App) timedWait(ctx context.Context) {
 	}
 }
 
-func (a *App) closeAll(ctx context.Context) {
+// closeAll 逆序执行资源关闭并聚合错误（#80）：错误经返回值进 lifecycle.Manager
+// 的 shutdownErrs（app-lifecycle:close job 返回它）⇒ Bootstrapper.Run 上抛 ⇒
+// 进程退出码反映关停质量——此前只 logger.Error 后继续，资源关闭失败（DB flush
+// 未落盘、连接未优雅断开）时退出码仍为 0，「带着未落盘数据退出」在滚动发版
+// 门禁 / K8s preStop 对账的部署链路上不可见。逐条日志保留（定位哪个资源）。
+func (a *App) closeAll(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	var errs []error
 	for i := len(a.closers) - 1; i >= 0; i-- {
 		c := a.closers[i]
 		if err := c.closer(ctx); err != nil {
 			logger.Error("close resource failed", "resource", c.name, "err", err)
+			errs = append(errs, fmt.Errorf("%s: %w", c.name, err))
 		} else {
 			logger.Info("resource closed", "resource", c.name)
 		}
 	}
+	return errors.Join(errs...)
 }
