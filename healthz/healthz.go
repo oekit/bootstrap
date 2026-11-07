@@ -184,7 +184,7 @@ type Result struct {
 	// Checks 是硬失败项:check name → 错误信息。非空时 503。
 	Checks map[string]string `json:"checks,omitempty"`
 	// Degraded 是软依赖降级项:check name → 降级原因。不触发 503
-	//(HTTP 仍 200,整体 status = StatusDegraded 供告警识别,oekit#140)。
+	// (HTTP 仍 200,整体 status = StatusDegraded 供告警识别,oekit#140)。
 	Degraded map[string]string `json:"degraded,omitempty"`
 }
 
