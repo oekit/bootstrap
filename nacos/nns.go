@@ -75,6 +75,11 @@ type NNSComponent struct {
 	// Required 为 true 时，NNS 初始化失败将返回错误（fail-fast），
 	// 触发 Bootstrapper 的回滚与启动失败；为 false（默认）时仅告警并
 	// 继续启动（服务对 NNS 为软依赖）。
+	//
+	// fail-fast 贯穿到注册失败（nns#77）：注册延迟到 app.Ready() 之后
+	// 执行，若此时 Register 失败且 Required=true，组件会 RequestShutdown
+	// 中止启动——「强依赖」不再只覆盖 Init 阶段，「未注册但还在跑」的
+	// 假活窗口被关掉。
 	Required bool
 	// ReadyTimeout 是就绪门看门狗超时：等待 app.Ready() 超过该时长仍未
 	// 就绪则打 ERROR 日志（点明漏接就绪门 ⇒ 服务不会注册到注册中心）。
@@ -271,6 +276,16 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 					Err:     err,
 					Since:   time.Now(),
 				})
+				// Required fail-fast 贯穿到注册失败（nns#77）：注册是 Ready
+				// 之后的延迟动作，Init 阶段的 fail-fast 管不到这里——强依赖
+				// 服务「未注册但还在跑」等于对集群不可用，与初始化失败同罪。
+				// 出口与 ReadyFatal（#74）相同：RequestShutdown 取消根 ctx，
+				// userFn 解除阻塞、走优雅关停（启动语境下即中止启动）。
+				if c.Required {
+					logger.Error("nns register failed on required component, requesting shutdown",
+						"service", c.NacosCfg.ServiceName, "err", err)
+					app.RequestShutdown()
+				}
 				return
 			}
 			// 注册成功后才挂反注册。app.AddResource 落在 close 阶段且按注册
@@ -405,7 +420,9 @@ func WithReadyFatal() bootstrap.BootstrapperOption {
 }
 
 // WithRequiredNNS 添加 NNS 组件并声明为强依赖：
-// NNS 初始化失败时启动失败（fail-fast），而非默认的告警继续。
+// NNS 初始化失败时启动失败（fail-fast），而非默认的告警继续；
+// 注册失败（Ready 之后的延迟动作）同样触发 fail-fast——RequestShutdown
+// 中止启动（nns#77），强依赖语义覆盖注册全流程。
 func WithRequiredNNS(nacosCfg nacospkg.Bootstrap, port int, depServices []string, nnsOpts ...nns.NNSOption) bootstrap.BootstrapperOption {
 	return func(b *bootstrap.Bootstrapper) {
 		b.AddComponent(&NNSComponent{
