@@ -42,12 +42,6 @@
 
 - build: 矩阵依赖地板对齐（第二轮发版后置）
 
-## [v0.6.10] — 2026-11-06
-
-- fix(app): 关停错误上抛（bootstrap#80）+ docs: WithReadyTimeout 作用域修正（bootstrap#76）
-
-关联问题单：bootstrap#80、bootstrap#76。
-
 ## [obs/v0.2.16] — 2026-11-06
 
 - build: 矩阵依赖地板对齐（维护轮 #233）
