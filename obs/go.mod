@@ -3,11 +3,11 @@ module github.com/oekit/bootstrap/obs
 go 1.26.0
 
 require (
-	github.com/oekit/bootstrap v0.6.15
+	github.com/oekit/bootstrap v0.6.16
 	github.com/oekit/core v0.13.3
 	github.com/oekit/logx v0.8.10
 	github.com/oekit/metrics v0.1.15
-	github.com/oekit/tracing v0.3.5
+	github.com/oekit/tracing v0.3.6
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 )
