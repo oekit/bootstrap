@@ -209,6 +209,19 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	//    是单个任务的默认超时），此处传 Background 不做全局截断，
 	//    保证尾部任务（如 nns-deregister）拿到完整预算，不留幽灵实例
 	mgr.Shutdown(context.Background())
+
+	// #80：关停错误上抛——资源关闭失败（DB flush 未落盘、连接未优雅断开）
+	// 时退出码必须反映关停质量，此前 runErr 只承载 userFn 错误，「带着未落盘
+	// 数据退出、退出码 0」在滚动发版门禁 / K8s preStop 对账的部署链路上
+	// 不可见。runErr 优先（业务错误是主因），关停错误以 join 附加。
+	if shutdownErrs := mgr.Errors(); len(shutdownErrs) > 0 {
+		logger.Error("shutdown errors during resource teardown", "count", len(shutdownErrs), "errs", shutdownErrs)
+		joined := errors.Join(shutdownErrs...)
+		if runErr != nil {
+			return fmt.Errorf("%w; shutdown: %w", runErr, joined)
+		}
+		return joined
+	}
 	return runErr
 }
 

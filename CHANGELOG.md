@@ -42,12 +42,6 @@
 
 - build: 矩阵依赖地板对齐（第二轮发版后置）
 
-## [v0.6.10] — 2026-11-06
-
-- fix(app): 关停错误上抛（bootstrap#80）+ docs: WithReadyTimeout 作用域修正（bootstrap#76）
-
-关联问题单：bootstrap#80、bootstrap#76。
-
 ## [obs/v0.2.16] — 2026-11-06
 
 - build: 矩阵依赖地板对齐（维护轮 #233）
@@ -63,6 +57,13 @@
 ## [nacos/v0.3.13] — 2026-11-06
 
 - build: 矩阵依赖地板对齐（维护轮 #233）
+
+## [v0.6.10] — 2026-11-06
+
+- **BREAKING** fix(app): 关停错误上抛——资源关闭失败时退出码不再为 0（[#80](https://github.com/oekit/bootstrap/issues/80)）——`closeAll` 对 closer 错误只 `logger.Error` 后继续，错误进不了 lifecycle.Manager 的 shutdownErrs；`Run` 只返回 runErr——资源关闭失败（DB flush 未落盘、连接未优雅断开）时**进程退出码仍为 0**，滚动发版门禁 / K8s preStop 对账把「带着未落盘数据退出」判成成功，数据丢失在部署链路上不可见。修法：closeAll 聚合错误（带资源名，errors.Is 可辨）→ app-lifecycle:close job 返回→ shutdownErrs → Run 末尾上抛（runErr 优先，关停错误 join 附加）。**升级可见**：依赖『rr==nil 即干净关停」的消费方（如欠面把 AddResource 错误当告警的场景）退出码会变——这正是本修复的目的；需旧行为请在 closer 内部自行容错
+- docs(nacos): `WithReadyTimeout` 作用域按实现修正为进程级全局（[#76](https://github.com/oekit/bootstrap/issues/76)）——doc 曾宣称「须在 WithNNS 之前应用、仅作用于同一 Bootstrapper」，实现是包级 atomic（顺序无关、后写覆盖先写），同文件两处注释互相矛盾。按真实行为修正（进程全局、任何 Bootstrapper 的 NNS 组件 Init 时读取）；多 Bootstrapper 场景需 per-作用域时用组件字段 NNSComponent.ReadyTimeout。行为零改变，只修文档（与 #74 的 WithReadyFatal 全局选项同一款式）
+
+关联问题单：bootstrap#76、bootstrap#80。
 
 ## [v0.6.9] — 2026-11-06
 
