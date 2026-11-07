@@ -21,12 +21,12 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 h1:/Tnpcb2E0Pz/tN9s3bfEY2Q8ePC
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0/go.mod h1:zOBXOsUaBSjKgmH4OGzV1esUpR3oUSCPYVd2cUBjKYY=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
-github.com/oekit/concurrency v0.28.2 h1:mD29H1fieYNGvQMcbDJLhNPjlCo4qlpoKK+B4ML2RNo=
-github.com/oekit/concurrency v0.28.2/go.mod h1:HRmw/O1BsmyfM5DYFoZeL5LqzNAAxdkF0ESORPNxTjI=
+github.com/oekit/concurrency v0.28.3 h1:58u4i/NTSuI1Dzbcm8wsRaairVfbA/CUYMhdpPCNTA8=
+github.com/oekit/concurrency v0.28.3/go.mod h1:yjKEeriuksfgZdVH5GES+L8FO0KfxzaoCA5o6UrvdPc=
 github.com/oekit/core v0.13.2 h1:4r7ulxDb4zo1GwYFVDVNd6ta/vCsiK+Fe8pCP3BiHfQ=
 github.com/oekit/core v0.13.2/go.mod h1:HhBTwYHU5MUp9tfNvHjfZv6P4yglQmn4jKmz98dUIsM=
-github.com/oekit/logx v0.8.7 h1:aBPwMYTtrfrf2BJZR4JGLSteaP5RtjHpHM+jLS9oaTI=
-github.com/oekit/logx v0.8.7/go.mod h1:wUsASSs8nfRzr/l7rpf+96q1VyPY74S3EdkBKCVxajo=
+github.com/oekit/logx v0.8.8 h1:VaxgjmDVszqqr4k+vNtBVczBSMfYjWAdFrTWQrb/Wak=
+github.com/oekit/logx v0.8.8/go.mod h1:wUsASSs8nfRzr/l7rpf+96q1VyPY74S3EdkBKCVxajo=
 github.com/oekit/metrics v0.1.14 h1:hRxYGw4x/O38I+SfZ1p1b6SsEWQQ5kH+oPdWxX6OSPE=
 github.com/oekit/metrics v0.1.14/go.mod h1:8/6QBnZ1306yrZcu8jPTe+Atha0QtTm+/K5NCi/0kyc=
 github.com/oekit/tracing v0.3.5 h1:5bGJ7tUBnNR/BBOMMGN+Q0UY1v6gh78ovS2H25gvKJE=
