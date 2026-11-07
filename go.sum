@@ -1,8 +1,8 @@
 github.com/cloudwego/hertz v0.10.6 h1:VXUO0RdycrYOv8x2JgbQCJh2ovTrkRM6tS4isHN9dwI=
 github.com/cloudwego/hertz v0.10.6/go.mod h1:9Kkpj+fpkWLaKEnoil1Mnp/oxWp9iYx/mUk+fViqQ3E=
-github.com/oekit/concurrency v0.25.1 h1:MJ8EqzkTzk282qAOrV1PjzNrxoNo4salrzun7K1zqPE=
-github.com/oekit/concurrency v0.25.1/go.mod h1:jcmGKsn824v7RA3+CubaOqXERFJtsLMpgMSaMZOAxjo=
-github.com/oekit/core v0.12.2 h1:HeuiNUQlPvTo/8wNZzsqqKOzow33z1bDKglpOlBWVUo=
-github.com/oekit/core v0.12.2/go.mod h1:HhBTwYHU5MUp9tfNvHjfZv6P4yglQmn4jKmz98dUIsM=
-github.com/oekit/logx v0.8.4 h1:Z/39ZuDi5PjDioi4r83pzNWjIfDE9mXVDNgC8mvpPes=
-github.com/oekit/logx v0.8.4/go.mod h1:PImzWIays3sTLxewhKh8wI8xqMlATVJxz6V0ifIgNso=
+github.com/oekit/concurrency v0.28.0 h1:niGFAbA5s0vuUShofur479ZbzMSw4BtVDEBFb4Bv/3U=
+github.com/oekit/concurrency v0.28.0/go.mod h1:dJ8h++l2iUtRZDxvCIKWv+jth7fO9VlD1IoM+WTW9BY=
+github.com/oekit/core v0.13.1 h1:ShaACnIf016W9uXIel80MCiewlFizrzQ/zbT2UeCtlY=
+github.com/oekit/core v0.13.1/go.mod h1:HhBTwYHU5MUp9tfNvHjfZv6P4yglQmn4jKmz98dUIsM=
+github.com/oekit/logx v0.8.6 h1:dFPV8jbSfECZGM7v/WFFulzF3dAXsFCzX+hVCRDTFIw=
+github.com/oekit/logx v0.8.6/go.mod h1:wUsASSs8nfRzr/l7rpf+96q1VyPY74S3EdkBKCVxajo=
