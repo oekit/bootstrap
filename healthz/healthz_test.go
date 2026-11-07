@@ -242,3 +242,96 @@ func TestHandle_CheckOwnTimeoutNotTotalTimeout(t *testing.T) {
 		t.Errorf("body = %s, must not mislabel check's own timeout as total timeout", body)
 	}
 }
+
+// TestHandle_DegradedStill200 钉住 oekit#140：check 返回 Degraded 表示软依赖
+// 降级——HTTP 仍 200（不触发 503 摘流）、整体 status="degraded"、降级项
+// 记入 degraded map 且不出现在 checks（硬失败）map。
+func TestHandle_DegradedStill200(t *testing.T) {
+	reset()
+
+	RegisterCheck("db", func(_ context.Context) error { return nil })
+	RegisterCheck("cache", func(_ context.Context) error {
+		return Degraded(errors.New("cache unreachable"))
+	})
+
+	status, body := Handle(context.Background())
+	if status != 200 {
+		t.Errorf("status = %d, want 200（降级不摘流，oekit#140）", status)
+	}
+	if !strings.Contains(body, `"status":"degraded"`) {
+		t.Errorf("body = %s, want status:degraded", body)
+	}
+	if !strings.Contains(body, `"degraded":{"cache":"cache unreachable"}`) {
+		t.Errorf("body = %s, want degraded map 带降级原因", body)
+	}
+	if strings.Contains(body, `"checks"`) {
+		t.Errorf("body = %s, 降级项不得进入 checks（硬失败 map）", body)
+	}
+}
+
+// TestHandle_Degraded_HardFailureWins 钉住 oekit#140：降级与硬失败并存时
+// 摘流优先——503 + unhealthy，硬失败进 checks，降级项仍随 body 可见。
+func TestHandle_Degraded_HardFailureWins(t *testing.T) {
+	reset()
+
+	RegisterCheck("mysql", func(_ context.Context) error {
+		return errors.New("connection refused")
+	})
+	RegisterCheck("cache", func(_ context.Context) error {
+		return Degraded(errors.New("cache unreachable"))
+	})
+
+	status, body := Handle(context.Background())
+	if status != 503 {
+		t.Errorf("status = %d, want 503（硬失败优先于降级）", status)
+	}
+	if !strings.Contains(body, `"status":"unhealthy"`) {
+		t.Errorf("body = %s, want status:unhealthy", body)
+	}
+	if !strings.Contains(body, `"mysql":"connection refused"`) {
+		t.Errorf("body = %s, want checks 带硬失败详情", body)
+	}
+	if !strings.Contains(body, `"degraded":{"cache":"cache unreachable"}`) {
+		t.Errorf("body = %s, want degraded map 仍可见", body)
+	}
+}
+
+// TestHandle_Degraded_MarkClosedStill503 钉住 oekit#140：registry 进入关闭态
+// 后一律 503——降级语义不改变「应用关闭即不可用」的判定。
+func TestHandle_Degraded_MarkClosedStill503(t *testing.T) {
+	reset()
+
+	RegisterCheck("cache", func(_ context.Context) error {
+		return Degraded(errors.New("cache unreachable"))
+	})
+	MarkClosed()
+
+	status, body := Handle(context.Background())
+	if status != 503 {
+		t.Errorf("status = %d, want 503（closed 优先）", status)
+	}
+	if !strings.Contains(body, `"closed":true`) {
+		t.Errorf("body = %s, want closed:true", body)
+	}
+}
+
+// TestDegradedError_UnwrapChain 钉住 Degraded 的错误链语义（与
+// hertz/health.DegradedError 对齐）：errors.Is/As 能穿透到底层错误。
+func TestDegradedError_UnwrapChain(t *testing.T) {
+	inner := errors.New("dial timeout")
+	err := Degraded(inner)
+
+	var deg *DegradedError
+	if !errors.As(err, &deg) {
+		t.Fatal("errors.As 应识别 DegradedError")
+	}
+	if !errors.Is(err, inner) {
+		t.Fatal("errors.Is 应穿透到底层错误")
+	}
+	if got := err.Error(); got != "dial timeout" {
+		t.Errorf("Error() = %q, want 底层错误文案", got)
+	}
+	if got := Degraded(nil).Error(); got != "degraded" {
+		t.Errorf("Degraded(nil).Error() = %q, want %q", got, "degraded")
+	}
+}

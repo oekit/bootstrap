@@ -29,14 +29,25 @@ type App struct {
 	ctx         context.Context
 	waitTimeout time.Duration // GoBackground goroutine drain timeout
 
+	// closing 在 app-lifecycle:cancel 阶段（先于 a.cancel）置位（#104）：
+	// 此后 GoBackground 拒绝新注册。由此保证 wg.Add（正 delta）要么发生在
+	// wait 阶段 timedWait 的 wg.Wait 启动之前、要么根本不发生——消除
+	// 「counter 为零时 Wait 运行中发起正 delta Add」这一 sync.WaitGroup
+	// 规则未定义行为的窗口。
+	closing bool
+	// closeDone 在 closeAll 收敛（无剩余 closer 且不再有新增）后置位（#99）：
+	// 此后 AddResource 的 closer 永远不会被调用，注册时打 ERROR 留痕。
+	closeDone bool
+
 	readyOnce sync.Once
 	ready     chan struct{} // NewApp 初始化；Ready 时 close 广播
 	readyFlag atomic.Bool
 }
 
 type namedCloser struct {
-	name   string
-	closer func(context.Context) error
+	name    string
+	closer  func(context.Context) error
+	timeout time.Duration // 独立关闭超时预算（#75）；0 表示不单独限时
 }
 
 // defaultWaitTimeout is the default drain timeout for GoBackground goroutines.
@@ -68,6 +79,11 @@ func NewApp(mgr *lifecycle.Manager) *App {
 	// 四个阶段独立注册，按注册顺序依次执行。
 	// 拆开后每个 phase 独立超时、独立日志，用户也可在中间插入自定义 job。
 	mgr.Add("app-lifecycle:cancel", func(_ context.Context) error {
+		// 先关闸（closing）再 cancel（#104）：观察到 ctx.Done 的任意代码
+		// 路径里，GoBackground 的注册闸必已关闭。
+		a.mu.Lock()
+		a.closing = true
+		a.mu.Unlock()
 		a.cancel()
 		return nil
 	}, 0)
@@ -109,16 +125,64 @@ func (a *App) IsReady() bool { return a.readyFlag.Load() }
 
 // AddResource 注册需要在关闭时释放的资源。
 // name 用于日志标识，closer 是关闭函数。
+//
+// closer 在 close 阶段按注册逆序执行，无独立超时预算（受 Manager 的
+// close job 超时约束）。需要逐资源预算隔离（防止单个资源卡死吃光后续
+// 清理预算）时用 AddResourceTimeout（#75）。
+//
+// 关停边界（#99）：关闭序列启动后（close 阶段收敛循环结束前）注册的
+// closer 仍会被执行；close 阶段已结束后注册的 closer 永远不会执行
+// （打 ERROR 留痕）。
 func (a *App) AddResource(name string, closer func(context.Context) error) {
+	a.AddResourceTimeout(name, 0, closer)
+}
+
+// AddResourceTimeout 注册需要在关闭时释放的资源，并为其设置独立的关闭
+// 超时预算 timeout（#75）——App 用户直接获得 core/lifecycle.Manager 的
+// per-job 预算隔离语义，不必再手写 Manager↔App 适配层。
+//
+// 预算语义（对齐 Manager 的 per-job 超时）：
+//   - 预算从 Background 派生而非共享 close 阶段的全局预算：前序资源的
+//     耗时不会挤占本资源的预算。典型场景（octopus 停机编排）：outbox
+//     排空 20s / otel 摘除 10s / nns 注销 10s 三阶段独立预算——共享预算时
+//     outbox 卡住会吃光 nns 注销的预算，产生「已注册但永不反注册」的
+//     幽灵实例。
+//   - 超时是协作式的：到点时 closer 收到已取消的 ctx，错误经 close 阶段
+//     聚合上抛（#80）；不感知 ctx 的 closer 无法被强杀，仍会阻塞 close 阶段。
+//   - timeout <= 0 表示不单独限时（等同 AddResource）。
+//
+// 关停边界（#99）：关闭序列启动后（close 阶段收敛循环结束前）注册的
+// closer 仍会被执行；close 阶段已结束后注册的 closer 永远不会执行
+// （打 ERROR 留痕）。
+func (a *App) AddResourceTimeout(name string, timeout time.Duration, closer func(context.Context) error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.closers = append(a.closers, namedCloser{name: name, closer: closer})
+	if a.closeDone {
+		logger.Error("resource added after close phase completed; its closer will never run",
+			"resource", name)
+	}
+	a.closers = append(a.closers, namedCloser{name: name, closer: closer, timeout: timeout})
 }
 
 // GoBackground 启动一个带 panic recovery 的后台 goroutine。
 // 关闭时通过 ctx 取消信号通知退出，并等待所有后台任务完成。
+//
+// 关停边界（#104）：shutdown 序列启动（app-lifecycle:cancel 阶段）之后再
+// 调用会被拒绝并打 Warn 日志——fn 不执行。此前该窗口内的 wg.Add（正
+// delta）与 wait 阶段 timedWait 的 wg.Wait 并发，属于 sync.WaitGroup 规则
+// 的未定义行为（counter 为零时 Wait 运行中发起 Add，可能 panic 或漏等）。
 func (a *App) GoBackground(name string, fn func(ctx context.Context)) {
+	a.mu.Lock()
+	if a.closing {
+		a.mu.Unlock()
+		logger.Warn("app shutting down, background task rejected", "task", name)
+		return
+	}
+	// wg.Add 在锁内、closing 检查之后：与 timedWait 的 wg.Wait 之间由
+	// closing 置位（同锁、且发生在 cancel 阶段）全序化——Wait 启动后
+	// 不再可能出现正 delta Add（#104）。
 	a.wg.Add(1)
+	a.mu.Unlock()
 	async.GoSafe(func() {
 		defer a.wg.Done()
 		fn(a.ctx)
@@ -186,18 +250,57 @@ func (a *App) timedWait(ctx context.Context) {
 // 进程退出码反映关停质量——此前只 logger.Error 后继续，资源关闭失败（DB flush
 // 未落盘、连接未优雅断开）时退出码仍为 0，「带着未落盘数据退出」在滚动发版
 // 门禁 / K8s preStop 对账的部署链路上不可见。逐条日志保留（定位哪个资源）。
+//
+// 锁纪律（#102/#99，对齐 core/lifecycle.Manager.Shutdown 的「锁内取、锁外执行」
+// 范式）：closeAll 全程**不持锁执行 closer**——closer 内回调
+// AddResource/AddResourceTimeout/SetWaitTimeout（同锁；常见写法：某资源的
+// Close 里注册后续清理、更新 drain 预算）不再死锁挂死整个关停序列。
+// 收敛循环（#99）：每轮「加锁取队尾 closer→解锁执行→再检查是否有新增」，
+// 直到无剩余 closer——关闭序列启动后注册的 closer（如 nns-deregister 恰在
+// 关停竞态窗口完成 nnsc.Register 后才 AddResource）也会被执行，不再产生
+// 「已注册但永不反注册」的注册中心幽灵实例（此前只能靠 nacos ephemeral
+// 心跳超时兜底，数十秒窗口内流量打向已停止的 server）。
 func (a *App) closeAll(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	var errs []error
-	for i := len(a.closers) - 1; i >= 0; i-- {
-		c := a.closers[i]
-		if err := c.closer(ctx); err != nil {
+	for {
+		a.mu.Lock()
+		if len(a.closers) == 0 {
+			a.closeDone = true
+			a.mu.Unlock()
+			return errors.Join(errs...)
+		}
+		// 取队尾（注册逆序）后立即放锁，执行段不持锁（#102）。
+		c := a.closers[len(a.closers)-1]
+		a.closers = a.closers[:len(a.closers)-1]
+		a.mu.Unlock()
+
+		if err := runCloserWithBudget(ctx, c); err != nil {
 			logger.Error("close resource failed", "resource", c.name, "err", err)
 			errs = append(errs, fmt.Errorf("%s: %w", c.name, err))
 		} else {
 			logger.Info("resource closed", "resource", c.name)
 		}
 	}
-	return errors.Join(errs...)
+}
+
+// runCloserWithBudget 执行单个 closer：独立超时预算 + 父 ctx 取消传播 +
+// 预算切片（#75）。语义对齐 core/lifecycle.Manager.runCloser。
+//
+// timeout <= 0 时不设独立预算，直接透传 close 阶段的 ctx。预算从
+// Background 派生而非从 parent 派生：前序资源的耗时不得挤占本资源的预算；
+// parent 的取消/超时作为外部中止信号同步取消本资源（AfterFunc）。
+func runCloserWithBudget(parent context.Context, c namedCloser) error {
+	if c.timeout <= 0 {
+		return c.closer(parent)
+	}
+	jobCtx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	defer cancel()
+	if err := parent.Err(); err != nil {
+		// 调用方 ctx 已取消/超时：同步取消本资源，closer 立即观察到取消态
+		cancel()
+		return c.closer(jobCtx)
+	}
+	stop := context.AfterFunc(parent, cancel)
+	defer stop()
+	return c.closer(jobCtx)
 }

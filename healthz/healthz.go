@@ -1,6 +1,6 @@
 // Package healthz 提供 ekit 应用健康检查 helper,让业务注册多个 check
 // 项(DB / Redis / 上游依赖等),/healthz endpoint 一次调起,全部通过返 200,
-// 任一失败返 503。
+// 任一硬失败返 503;软依赖降级(Degraded)返 200 + status "degraded"。
 //
 // 集成方式(hertz):
 //
@@ -25,6 +25,35 @@
 //   - /livez    — 只检查进程存活,永远 200(给 K8s livenessProbe)
 //   - /readyz   — 等同 /healthz(给 K8s readinessProbe)
 //
+// # 三态与软依赖降级
+//
+// check 返回 Degraded(err) 表示软依赖降级:该项记入 Result.Degraded、整体
+// status = StatusDegraded,但 HTTP 仍 200(不触发 503)——软依赖(缓存、旁路
+// 服务)不可用不应让就绪探针失败导致实例被摘流,但保持可见供告警识别。
+// 硬失败(普通 error)仍 503 + StatusUnhealthy。优先级:硬失败 > 降级 > ok。
+//
+// # 与 hertz/health 的规范与差异
+//
+// github.com/oekit/hertz/health 是 HTTP 服务健康端点的**规范形态**;本包是
+// **传输无关的极简形态**——裸 JSON 有意为之(不假设调用方运行在 ekit
+// middleware/信封栈上),适合非 hertz 传输(gRPC/kitex、CLI、定时任务)或
+// 只需要 (statusCode, body) 二元组的场景。两者三态语义(ok / degraded /
+// 硬失败)一致,差异速查:
+//
+//   - 响应形状:hertz/health 是 ekit 信封
+//     {code,data:{status,checks:[{name,status,error}]},message,trace_id};
+//     本包是裸 JSON {status,closed,checks:{name:错误},degraded:{name:原因}},
+//     checks/degraded 是 map 且默认不含通过项
+//   - 整体失败态命名:hertz/health 是 data.status = "error";本包是
+//     status = "unhealthy"
+//   - 默认总超时:hertz/health 3s(WithCheckTimeout 调整);本包 5s
+//     (SetCheckTimeout 调整)
+//   - 超时文案:hertz/health 未完成的 check 记 status=error + "timeout"
+//     (默认脱敏,WithVerboseErrors 透出详情);本包记
+//     "check timeout after 5s"(含总超时时长)
+//   - 注册形态:hertz/health 每个 handler 独立 Options;本包是包级
+//     singleton(全应用一个 registry)
+//
 // 设计:无外部依赖,业务按需注册;包级 singleton(全应用共享一个 registry)。
 package healthz
 
@@ -41,8 +70,56 @@ import (
 	"github.com/oekit/concurrency/async"
 )
 
-// Check 是单个健康检查项。返回 nil 表示通过,error 表示失败 + 原因。
+// Check 是单个健康检查项。返回 nil 表示通过;返回普通 error 表示硬失败
+// (触发 503);返回 Degraded(err) 表示软依赖降级(HTTP 仍 200,记入
+// Result.Degraded,见 Degraded)。
 type Check func(ctx context.Context) error
+
+// Result.Status 的取值。建议消费方用常量比较,不要硬编码字面量——
+// 裸字符串比较一旦拼错(如 "degrade")是静默失效,恒不命中。
+const (
+	// StatusOK 全部 check 通过(或降级项也没有)。
+	StatusOK = "ok"
+	// StatusDegraded 存在软依赖降级项且无硬失败:HTTP 仍 200,供告警识别。
+	StatusDegraded = "degraded"
+	// StatusUnhealthy 存在硬失败项(或 registry 已 MarkClosed):503。
+	StatusUnhealthy = "unhealthy"
+)
+
+// DegradedError 表示软依赖降级:不影响就绪(HTTP 仍 200),该 check 记入
+// Result.Degraded、整体 status = StatusDegraded,供告警系统识别。与硬失败
+// (普通 error → 503 + StatusUnhealthy)区分:软依赖(缓存、旁路服务)不可用
+// 应保持可见,但不应让就绪探针失败导致实例被摘流。
+// 语义与 hertz/health.DegradedError 三态对齐(oekit#140)。
+type DegradedError struct {
+	// Err 是导致降级的底层错误,经 Unwrap 暴露,可被 errors.Is/As 链识别。
+	Err error
+}
+
+// Error 实现 error 接口。
+func (e *DegradedError) Error() string {
+	if e.Err == nil {
+		return "degraded"
+	}
+	return e.Err.Error()
+}
+
+// Unwrap 返回底层错误,支持 errors.Is/As 链式判定。
+func (e *DegradedError) Unwrap() error { return e.Err }
+
+// Degraded 将错误标记为软依赖降级。
+// 在 check 中返回 Degraded(err),Handle 仍返 200、Result.Status =
+// StatusDegraded,该项的降级原因记入 Result.Degraded——不触发 503 摘流。
+//
+// 用法:
+//
+//	healthz.RegisterCheck("cache", func(ctx context.Context) error {
+//	    if err := cache.Ping(ctx); err != nil {
+//	        return healthz.Degraded(err) // 软依赖:降级可见但不摘流
+//	    }
+//	    return nil
+//	})
+func Degraded(err error) error { return &DegradedError{Err: err} }
 
 // defaultCheckTimeout 是单次 Handle 允许的最长耗时;超时的 check 记为
 // failure("check timeout")。K8s probe 有自己的 timeoutSeconds,健康端点
@@ -102,14 +179,19 @@ func ResetForTest() {
 
 // Result 是 Handle 的输出(可在 HTTP handler 里转 JSON)。
 type Result struct {
-	Status string            `json:"status"` // "ok" / "unhealthy"
-	Closed bool              `json:"closed"`
-	Checks map[string]string `json:"checks,omitempty"` // check name → 错误信息(失败时)
+	Status string `json:"status"` // StatusOK / StatusDegraded / StatusUnhealthy
+	Closed bool   `json:"closed"`
+	// Checks 是硬失败项:check name → 错误信息。非空时 503。
+	Checks map[string]string `json:"checks,omitempty"`
+	// Degraded 是软依赖降级项:check name → 降级原因。不触发 503
+	// (HTTP 仍 200,整体 status = StatusDegraded 供告警识别,oekit#140)。
+	Degraded map[string]string `json:"degraded,omitempty"`
 }
 
 // Handle 并发执行所有注册的 check。返回 (statusCode, jsonBody) 供 HTTP handler 用。
 //   - 全部 check 通过 + 未 closed → 200 + "ok"
-//   - 任一 check 失败 → 503 + 失败详情
+//   - 任一 check 硬失败 → 503 + 失败详情
+//   - 无硬失败但存在 Degraded 降级项 → 200 + status "degraded" + 降级详情
 //   - MarkClosed 已调 → 503 + closed:true
 //
 // check 用 errgroup-like 模式并发跑,总耗时 = 最慢 check(而非总和),
@@ -120,7 +202,7 @@ type Result struct {
 // liveness/readiness 探测(2026-09-05 复审修复)。
 func Handle(ctx context.Context) (int, string) {
 	if global.closed.Load() {
-		body, _ := json.Marshal(Result{Status: "unhealthy", Closed: true})
+		body, _ := json.Marshal(Result{Status: StatusUnhealthy, Closed: true})
 		return 503, string(body)
 	}
 
@@ -132,7 +214,7 @@ func Handle(ctx context.Context) (int, string) {
 	global.mu.RUnlock()
 
 	if len(entries) == 0 {
-		body, _ := json.Marshal(Result{Status: "ok"})
+		body, _ := json.Marshal(Result{Status: StatusOK})
 		return 200, string(body)
 	}
 
@@ -174,6 +256,7 @@ func Handle(ctx context.Context) (int, string) {
 	}
 
 	failures := map[string]string{}
+	degraded := map[string]string{}
 	returned := make(map[string]bool, len(entries))
 collect:
 	for done := 0; done < len(entries); done++ {
@@ -181,7 +264,14 @@ collect:
 		case r := <-ch:
 			returned[r.name] = true
 			if r.err != nil {
-				failures[r.name] = failureText(r.err, runCtx, timeout)
+				// DegradedError 的降级语义优先:不改判为硬失败/超时,
+				// 记入 degraded map(与 hertz/health 的三态判定一致,oekit#140)
+				var deg *DegradedError
+				if errors.As(r.err, &deg) {
+					degraded[r.name] = deg.Error()
+				} else {
+					failures[r.name] = failureText(r.err, runCtx, timeout)
+				}
 			}
 		case <-deadline:
 			break collect
@@ -197,11 +287,17 @@ collect:
 		}
 	}
 
+	// 汇总优先级:硬失败 > 降级 > ok。降级不摘流(HTTP 200),硬失败 503;
+	// 硬失败与降级并存时摘流优先,但降级项仍随 body 可见。
 	if len(failures) > 0 {
-		body, _ := json.Marshal(Result{Status: "unhealthy", Checks: failures})
+		body, _ := json.Marshal(Result{Status: StatusUnhealthy, Checks: failures, Degraded: degraded})
 		return 503, string(body)
 	}
-	body, _ := json.Marshal(Result{Status: "ok"})
+	if len(degraded) > 0 {
+		body, _ := json.Marshal(Result{Status: StatusDegraded, Degraded: degraded})
+		return 200, string(body)
+	}
+	body, _ := json.Marshal(Result{Status: StatusOK})
 	return 200, string(body)
 }
 

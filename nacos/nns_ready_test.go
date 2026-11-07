@@ -307,3 +307,36 @@ func TestWithReadyTimeout(t *testing.T) {
 		t.Errorf("ready timeout = %v, want %v", got, 1234*time.Millisecond)
 	}
 }
+
+// TestNNSComponent_ReadyTimeoutFieldWinsOverGlobal 钉住 #100：WithReadyTimeout
+// 写的是包级全局（进程级作用域），per-Bootstrapper 作用域的正解是组件字段
+// NNSComponent.ReadyTimeout——Init 读取时**字段优先于全局缺省**。本用例把
+// 全局拉满 1 小时、字段设 50ms，看门狗必须按字段值触发：证明同进程第二个
+// Bootstrapper 不再被全局改写绑架（#100 的幽灵覆盖场景）。
+func TestNNSComponent_ReadyTimeoutFieldWinsOverGlobal(t *testing.T) {
+	withFakeNNS(t)
+	comp := newTestComponent()
+	comp.ReadyTimeout = 50 * time.Millisecond
+
+	orig := readyTimeoutNanos.Load()
+	t.Cleanup(func() { readyTimeoutNanos.Store(orig) })
+	WithReadyTimeout(time.Hour)(&bootstrap.Bootstrapper{}) // 全局缺省拉满
+
+	cap := &captureLogger{}
+	defer swapLogger(t, cap)()
+
+	mgr := lifecycle.New(2 * time.Second)
+	app := bootstrap.NewApp(mgr)
+	if err := comp.Init(context.Background(), app, mgr); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for !cap.containsSubstring("app.Ready() not called") {
+		if time.Now().After(deadline) {
+			t.Fatal("看门狗未按组件字段 50ms 触发——ReadyTimeout 字段优先级失效（#100）")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mgr.Shutdown(context.Background())
+}

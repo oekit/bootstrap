@@ -471,3 +471,148 @@ func TestApp_ReadyGate_UnblocksWaiter(t *testing.T) {
 		t.Fatal("waiter not released after Ready")
 	}
 }
+
+// TestApp_CloserMayReenterAppAPIs 钉住 #102：closeAll 执行 closer 时不得持有
+// a.mu——closer 内回调 SetWaitTimeout/AddResource（同锁；常见写法：某资源的
+// Close 里注册后续清理/更新 drain 预算）此前直接死锁，关停序列挂死，drain/
+// close/wait 阶段全停。修法对齐 kit 侧 lifecycle.Manager.Shutdown 的
+// 「锁内取、锁外执行」范式。
+func TestApp_CloserMayReenterAppAPIs(t *testing.T) {
+	mgr := lifecycle.New(2 * time.Second)
+	app := NewApp(mgr)
+	app.AddResource("reentrant", func(context.Context) error {
+		app.SetWaitTimeout(time.Second) // #102：此前在此死锁
+		app.AddResource("late", func(context.Context) error {
+			return nil
+		})
+		return nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		mgr.Shutdown(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("deadlock: closer 内调用 App API 被锁阻塞（#102）")
+	}
+}
+
+// TestApp_LateAddResourceDuringCloseStillClosed 钉住 #99：关闭序列启动后
+// （close 阶段进行中）注册的 closer 必须被执行。此前 closeAll 持锁遍历并
+// 执行全部 closer，AddResource 阻塞在 a.mu 上直到 close 阶段结束——后加入
+// 的 nns-deregister 永远漏调，实例已注册但永不反注册（幽灵实例）。
+func TestApp_LateAddResourceDuringCloseStillClosed(t *testing.T) {
+	mgr := lifecycle.New(2 * time.Second)
+	app := NewApp(mgr)
+
+	firstStarted := make(chan struct{})
+	proceed := make(chan struct{})
+	var lateRan atomic.Bool
+	app.AddResource("first", func(context.Context) error {
+		close(firstStarted)
+		<-proceed // 把 close 阶段挂起，制造与 AddResource 的竞态窗口
+		return nil
+	})
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		mgr.Shutdown(context.Background())
+		close(shutdownDone)
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first closer 未执行")
+	}
+
+	// close 阶段进行中注册：必须被收敛循环捕获并执行
+	app.AddResource("late", func(context.Context) error {
+		lateRan.Store(true)
+		return nil
+	})
+	close(proceed)
+
+	select {
+	case <-shutdownDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown 挂死：AddResource 与 closeAll 互相阻塞（#99/#102）")
+	}
+	if !lateRan.Load() {
+		t.Fatal("close 期间注册的 closer 被永久漏调（#99）——幽灵实例回归")
+	}
+}
+
+// TestApp_GoBackgroundRejectedAfterShutdownStarts 钉住 #104：shutdown 序列
+// 启动（app-lifecycle:cancel 已执行）后 GoBackground 必须拒绝并留痕。此前
+// 该窗口内的 wg.Add（正 delta）与 wait 阶段 timedWait 的 wg.Wait 并发，
+// 属于 sync.WaitGroup 规则未定义行为（counter 为零时 Wait 运行中 Add）。
+func TestApp_GoBackgroundRejectedAfterShutdownStarts(t *testing.T) {
+	mgr := lifecycle.New(2 * time.Second)
+	app := NewApp(mgr)
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		mgr.Shutdown(context.Background())
+		close(shutdownDone)
+	}()
+
+	// closing 在 a.cancel() 之前置位：观察到 ctx.Done 即可确定拒绝闸已关。
+	<-app.Context().Done()
+
+	var ran atomic.Bool
+	app.GoBackground("late", func(context.Context) { ran.Store(true) })
+
+	select {
+	case <-shutdownDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown 挂死")
+	}
+	// 若被错误接受，timedWait 会等到其执行完才放行 shutdown——
+	// shutdownDone 之后 ran 必为定值，无需 sleep。
+	if ran.Load() {
+		t.Fatal("shutdown 启动后 GoBackground 的任务不应执行（#104）")
+	}
+}
+
+// TestApp_AddResourceTimeout_BudgetIsolation 钉住 #75：逐资源关闭超时预算
+// 相互独立——慢资源超预算被切断后，后续资源仍拿到完整预算执行。共享全局
+// 预算时前序资源卡死会吃光后续清理预算（octopus 手写 65 行 Manager↔App
+// 适配层的动机：outbox 卡住 → nns 不注销 → 幽灵实例）。
+func TestApp_AddResourceTimeout_BudgetIsolation(t *testing.T) {
+	mgr := lifecycle.New(10 * time.Second) // close 阶段全局预算远大于单资源预算
+	app := NewApp(mgr)
+
+	var secondRan atomic.Bool
+	// 第一个资源：独立预算 50ms，closer 感知 ctx 但故意拖过预算
+	app.AddResourceTimeout("slow", 50*time.Millisecond, func(ctx context.Context) error {
+		<-ctx.Done() // 预算到点被切断
+		return ctx.Err()
+	})
+	// 第二个资源：必须被执行（不被前者的超预算挤掉）
+	app.AddResource("second", func(context.Context) error {
+		secondRan.Store(true)
+		return nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		mgr.Shutdown(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown 挂死：slow 资源的超预算未被独立预算切断（#75）")
+	}
+	if !secondRan.Load() {
+		t.Fatal("前序资源超预算不应吃光后续资源的执行机会（#75）")
+	}
+	// 超预算的资源以错误经 #80 链路上抛（退出码可感知）
+	if errs := mgr.Errors(); len(errs) == 0 {
+		t.Fatal("slow 资源超预算应产生关闭错误并上抛（#75/#80）")
+	}
+}
