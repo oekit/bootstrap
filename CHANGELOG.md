@@ -2,6 +2,14 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.21] — 2026-11-07
+
+- build: 父模块地板对齐（嵌套 go.mod 的父仓 require 跟随最新，audit 门禁项）
+
+## [nacos/v0.3.19] — 2026-11-07
+
+- build: 父模块地板对齐（嵌套 go.mod 的父仓 require 跟随最新，audit 门禁项）
+
 ## [obs/v0.2.20] — 2026-11-07
 
 - fix(worker): AddTicker 改完成驱动节拍 + CloseTimeout——慢任务不再背靠背补跑，Close 可超时放弃等待（#98）
