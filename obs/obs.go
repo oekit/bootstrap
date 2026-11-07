@@ -56,8 +56,25 @@ type TracingComponent struct {
 func (c *TracingComponent) Name() string { return "tracing" }
 
 // Init 初始化 OpenTelemetry 追踪，并注册 shutdown 钩子。
+//
+// 空 Endpoint 的语义与直接调用 tracing.Init 对齐（tracing#60）：不创建
+// OTLP 导出器、不发起网络连接，但安装本地 TracerProvider 与全局传播器
+// （B3 + OpenTracing + W3C TraceContext + Baggage）。此前空 Endpoint 直接
+// return nil——trace 上下文传播器都不安装，跨服务 trace 断链且完全静默。
 func (c *TracingComponent) Init(_ context.Context, _ *bootstrap.App, mgr *lifecycle.Manager) error {
 	if c.Config.Endpoint == "" {
+		// 复用 tracing.Init 的本地 provider 语义（tracing#60）：装传播器，
+		// 不建导出器。留空端点通常是「本地开发/暂无 collector」，传播链
+		// 不应随之断掉；打 WARN 点明未启用导出。
+		provider, err := tracing.Init(c.Config)
+		if err != nil {
+			return fmt.Errorf("tracing init: %w", err)
+		}
+		mgr.Add("tracing", func(ctx context.Context) error {
+			return provider.Shutdown(ctx)
+		}, 0)
+		logger.Warn("tracing endpoint empty — installed local provider + propagator only (no OTLP export); " +
+			"set Endpoint to enable export")
 		return nil
 	}
 
