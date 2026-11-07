@@ -45,8 +45,9 @@ type App struct {
 }
 
 type namedCloser struct {
-	name   string
-	closer func(context.Context) error
+	name    string
+	closer  func(context.Context) error
+	timeout time.Duration // 独立关闭超时预算（#75）；0 表示不单独限时
 }
 
 // defaultWaitTimeout is the default drain timeout for GoBackground goroutines.
@@ -125,17 +126,42 @@ func (a *App) IsReady() bool { return a.readyFlag.Load() }
 // AddResource 注册需要在关闭时释放的资源。
 // name 用于日志标识，closer 是关闭函数。
 //
+// closer 在 close 阶段按注册逆序执行，无独立超时预算（受 Manager 的
+// close job 超时约束）。需要逐资源预算隔离（防止单个资源卡死吃光后续
+// 清理预算）时用 AddResourceTimeout（#75）。
+//
 // 关停边界（#99）：关闭序列启动后（close 阶段收敛循环结束前）注册的
 // closer 仍会被执行；close 阶段已结束后注册的 closer 永远不会执行
 // （打 ERROR 留痕）。
 func (a *App) AddResource(name string, closer func(context.Context) error) {
+	a.AddResourceTimeout(name, 0, closer)
+}
+
+// AddResourceTimeout 注册需要在关闭时释放的资源，并为其设置独立的关闭
+// 超时预算 timeout（#75）——App 用户直接获得 core/lifecycle.Manager 的
+// per-job 预算隔离语义，不必再手写 Manager↔App 适配层。
+//
+// 预算语义（对齐 Manager 的 per-job 超时）：
+//   - 预算从 Background 派生而非共享 close 阶段的全局预算：前序资源的
+//     耗时不会挤占本资源的预算。典型场景（octopus 停机编排）：outbox
+//     排空 20s / otel 摘除 10s / nns 注销 10s 三阶段独立预算——共享预算时
+//     outbox 卡住会吃光 nns 注销的预算，产生「已注册但永不反注册」的
+//     幽灵实例。
+//   - 超时是协作式的：到点时 closer 收到已取消的 ctx，错误经 close 阶段
+//     聚合上抛（#80）；不感知 ctx 的 closer 无法被强杀，仍会阻塞 close 阶段。
+//   - timeout <= 0 表示不单独限时（等同 AddResource）。
+//
+// 关停边界（#99）：关闭序列启动后（close 阶段收敛循环结束前）注册的
+// closer 仍会被执行；close 阶段已结束后注册的 closer 永远不会执行
+// （打 ERROR 留痕）。
+func (a *App) AddResourceTimeout(name string, timeout time.Duration, closer func(context.Context) error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closeDone {
 		logger.Error("resource added after close phase completed; its closer will never run",
 			"resource", name)
 	}
-	a.closers = append(a.closers, namedCloser{name: name, closer: closer})
+	a.closers = append(a.closers, namedCloser{name: name, closer: closer, timeout: timeout})
 }
 
 // GoBackground 启动一个带 panic recovery 的后台 goroutine。
@@ -248,11 +274,33 @@ func (a *App) closeAll(ctx context.Context) error {
 		a.closers = a.closers[:len(a.closers)-1]
 		a.mu.Unlock()
 
-		if err := c.closer(ctx); err != nil {
+		if err := runCloserWithBudget(ctx, c); err != nil {
 			logger.Error("close resource failed", "resource", c.name, "err", err)
 			errs = append(errs, fmt.Errorf("%s: %w", c.name, err))
 		} else {
 			logger.Info("resource closed", "resource", c.name)
 		}
 	}
+}
+
+// runCloserWithBudget 执行单个 closer：独立超时预算 + 父 ctx 取消传播 +
+// 预算切片（#75）。语义对齐 core/lifecycle.Manager.runCloser。
+//
+// timeout <= 0 时不设独立预算，直接透传 close 阶段的 ctx。预算从
+// Background 派生而非从 parent 派生：前序资源的耗时不得挤占本资源的预算；
+// parent 的取消/超时作为外部中止信号同步取消本资源（AfterFunc）。
+func runCloserWithBudget(parent context.Context, c namedCloser) error {
+	if c.timeout <= 0 {
+		return c.closer(parent)
+	}
+	jobCtx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	defer cancel()
+	if err := parent.Err(); err != nil {
+		// 调用方 ctx 已取消/超时：同步取消本资源，closer 立即观察到取消态
+		cancel()
+		return c.closer(jobCtx)
+	}
+	stop := context.AfterFunc(parent, cancel)
+	defer stop()
+	return c.closer(jobCtx)
 }

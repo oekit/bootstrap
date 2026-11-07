@@ -577,3 +577,42 @@ func TestApp_GoBackgroundRejectedAfterShutdownStarts(t *testing.T) {
 		t.Fatal("shutdown 启动后 GoBackground 的任务不应执行（#104）")
 	}
 }
+
+// TestApp_AddResourceTimeout_BudgetIsolation 钉住 #75：逐资源关闭超时预算
+// 相互独立——慢资源超预算被切断后，后续资源仍拿到完整预算执行。共享全局
+// 预算时前序资源卡死会吃光后续清理预算（octopus 手写 65 行 Manager↔App
+// 适配层的动机：outbox 卡住 → nns 不注销 → 幽灵实例）。
+func TestApp_AddResourceTimeout_BudgetIsolation(t *testing.T) {
+	mgr := lifecycle.New(10 * time.Second) // close 阶段全局预算远大于单资源预算
+	app := NewApp(mgr)
+
+	var secondRan atomic.Bool
+	// 第一个资源：独立预算 50ms，closer 感知 ctx 但故意拖过预算
+	app.AddResourceTimeout("slow", 50*time.Millisecond, func(ctx context.Context) error {
+		<-ctx.Done() // 预算到点被切断
+		return ctx.Err()
+	})
+	// 第二个资源：必须被执行（不被前者的超预算挤掉）
+	app.AddResource("second", func(context.Context) error {
+		secondRan.Store(true)
+		return nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		mgr.Shutdown(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown 挂死：slow 资源的超预算未被独立预算切断（#75）")
+	}
+	if !secondRan.Load() {
+		t.Fatal("前序资源超预算不应吃光后续资源的执行机会（#75）")
+	}
+	// 超预算的资源以错误经 #80 链路上抛（退出码可感知）
+	if errs := mgr.Errors(); len(errs) == 0 {
+		t.Fatal("slow 资源超预算应产生关闭错误并上抛（#75/#80）")
+	}
+}
