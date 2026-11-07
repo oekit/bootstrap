@@ -2,6 +2,54 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.20] — 2026-11-07
+
+- fix(worker): AddTicker 改完成驱动节拍 + CloseTimeout——慢任务不再背靠背补跑，Close 可超时放弃等待（#98）
+- fix(worker): AddTicker 入口校验 interval>0（ErrInvalidInterval）——零/负值不再使周期任务 panic 后静默死亡（#101）
+- fix(worker): AddTicker/AddOnce 在 Close 后返回错误（ErrManagerClosed）——静默吞注册关闭（#103）
+- fix(app): closeAll 改「锁内拷贝、锁外执行」——closer 内回调 AddResource/SetWaitTimeout 不再死锁（#102）
+- fix(app): close 阶段收敛循环——关停竞态窗口注册的 closer 也被执行，closeAll 期间 AddResource 反注册不再漏调（#99）
+- fix(app): GoBackground 的 wg.Add 与 shutdown 期 wg.Wait 同锁全序化——WaitGroup 规则违例窗口关闭（#104）
+- feat(app): AddResourceTimeout——逐资源关停预算（预算隔离 + 父 ctx 取消传播），Manager 用户不再手写适配层（#75）
+- test(nacos): NNSComponent.ReadyTimeout 字段优先级回归——组件字段压过进程级全局（#100）
+- feat(healthz): Degraded(err) 三态语义对齐 hertz/health——软依赖降级不触发 503、Result.Degraded 字段；与 hertz/health 的规范与差异文档化（oekit#140）
+- fix(nacos): Required=true 注册失败 RequestShutdown——强依赖 fail-fast 贯穿注册面（nns#77）
+- fix(obs): 空 Endpoint 也装本地 provider+全局传播器——obs.WithTracing 与直接 tracing.Init 语义对齐（tracing#60）
+
+关联问题单：bootstrap#75、bootstrap#98、bootstrap#99、bootstrap#100、bootstrap#101、bootstrap#102、bootstrap#103、bootstrap#104。
+
+## [nacos/v0.3.18] — 2026-11-07
+
+- fix(worker): AddTicker 改完成驱动节拍 + CloseTimeout——慢任务不再背靠背补跑，Close 可超时放弃等待（#98）
+- fix(worker): AddTicker 入口校验 interval>0（ErrInvalidInterval）——零/负值不再使周期任务 panic 后静默死亡（#101）
+- fix(worker): AddTicker/AddOnce 在 Close 后返回错误（ErrManagerClosed）——静默吞注册关闭（#103）
+- fix(app): closeAll 改「锁内拷贝、锁外执行」——closer 内回调 AddResource/SetWaitTimeout 不再死锁（#102）
+- fix(app): close 阶段收敛循环——关停竞态窗口注册的 closer 也被执行，closeAll 期间 AddResource 反注册不再漏调（#99）
+- fix(app): GoBackground 的 wg.Add 与 shutdown 期 wg.Wait 同锁全序化——WaitGroup 规则违例窗口关闭（#104）
+- feat(app): AddResourceTimeout——逐资源关停预算（预算隔离 + 父 ctx 取消传播），Manager 用户不再手写适配层（#75）
+- test(nacos): NNSComponent.ReadyTimeout 字段优先级回归——组件字段压过进程级全局（#100）
+- feat(healthz): Degraded(err) 三态语义对齐 hertz/health——软依赖降级不触发 503、Result.Degraded 字段；与 hertz/health 的规范与差异文档化（oekit#140）
+- fix(nacos): Required=true 注册失败 RequestShutdown——强依赖 fail-fast 贯穿注册面（nns#77）
+- fix(obs): 空 Endpoint 也装本地 provider+全局传播器——obs.WithTracing 与直接 tracing.Init 语义对齐（tracing#60）
+
+关联问题单：bootstrap#75、bootstrap#98、bootstrap#99、bootstrap#100、bootstrap#101、bootstrap#102、bootstrap#103、bootstrap#104。
+
+## [v0.6.15] — 2026-11-07
+
+- fix(worker): AddTicker 改完成驱动节拍 + CloseTimeout——慢任务不再背靠背补跑，Close 可超时放弃等待（#98）
+- fix(worker): AddTicker 入口校验 interval>0（ErrInvalidInterval）——零/负值不再使周期任务 panic 后静默死亡（#101）
+- fix(worker): AddTicker/AddOnce 在 Close 后返回错误（ErrManagerClosed）——静默吞注册关闭（#103）
+- fix(app): closeAll 改「锁内拷贝、锁外执行」——closer 内回调 AddResource/SetWaitTimeout 不再死锁（#102）
+- fix(app): close 阶段收敛循环——关停竞态窗口注册的 closer 也被执行，closeAll 期间 AddResource 反注册不再漏调（#99）
+- fix(app): GoBackground 的 wg.Add 与 shutdown 期 wg.Wait 同锁全序化——WaitGroup 规则违例窗口关闭（#104）
+- feat(app): AddResourceTimeout——逐资源关停预算（预算隔离 + 父 ctx 取消传播），Manager 用户不再手写适配层（#75）
+- test(nacos): NNSComponent.ReadyTimeout 字段优先级回归——组件字段压过进程级全局（#100）
+- feat(healthz): Degraded(err) 三态语义对齐 hertz/health——软依赖降级不触发 503、Result.Degraded 字段；与 hertz/health 的规范与差异文档化（oekit#140）
+- fix(nacos): Required=true 注册失败 RequestShutdown——强依赖 fail-fast 贯穿注册面（nns#77）
+- fix(obs): 空 Endpoint 也装本地 provider+全局传播器——obs.WithTracing 与直接 tracing.Init 语义对齐（tracing#60）
+
+关联问题单：bootstrap#75、bootstrap#98、bootstrap#99、bootstrap#100、bootstrap#101、bootstrap#102、bootstrap#103、bootstrap#104。
+
 ## [obs/v0.2.19] — 2026-11-06
 
 - build: 矩阵依赖地板对齐（第二轮发版后置·终圈）
