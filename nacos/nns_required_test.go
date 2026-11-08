@@ -38,8 +38,8 @@ func withFailingRegisterNNS(t *testing.T, regErr error) *registerFailingClient {
 }
 
 // TestNNSComponent_RequiredRegisterFail_ShutsDown 钉住 nns#77：Required=true 时
-// 注册失败（Ready 之后的延迟动作）必须 RequestShutdown 中止启动——此前只打
-// ERROR 并置 PhaseFailed，强依赖服务在未注册状态下继续跑（假活）。
+// 注册失败（Ready 之后的延迟动作）必须 fail-fast 中止启动（App.Fail：cancel +
+// 错误上抛，#133）——此前只打 ERROR 并置 PhaseFailed，强依赖服务在未注册状态下继续跑（假活）。
 func TestNNSComponent_RequiredRegisterFail_ShutsDown(t *testing.T) {
 	fake := withFailingRegisterNNS(t, errors.New("nacos unreachable"))
 	comp := newTestComponent()
@@ -63,12 +63,12 @@ func TestNNSComponent_RequiredRegisterFail_ShutsDown(t *testing.T) {
 		}
 	}
 
-	// fail-fast：根 ctx 被 RequestShutdown 取消（userFn 因此解除阻塞、
+	// fail-fast：根 ctx 被 App.Fail 取消（userFn 因此解除阻塞、
 	// 走优雅关停——启动语境下即中止启动）
 	select {
 	case <-app.Context().Done():
 	case <-time.After(2 * time.Second):
-		t.Fatal("Required=true + Register 失败未触发 RequestShutdown（强依赖未 fail-fast）")
+		t.Fatal("Required=true + Register 失败未触发 fail-fast 关停（强依赖未 fail-fast）")
 	}
 
 	if st := comp.RegistrationState(); st == nil || st.Phase != PhaseFailed {
@@ -105,7 +105,7 @@ func TestNNSComponent_RequiredRegisterFail_SoftDependency_KeepsRunning(t *testin
 	// 软依赖：不关停，根 ctx 保持活跃
 	select {
 	case <-app.Context().Done():
-		t.Fatal("Required=false 时注册失败不应触发 RequestShutdown（软依赖语义被破坏）")
+		t.Fatal("Required=false 时注册失败不应触发 fail-fast 关停（软依赖语义被破坏）")
 	case <-time.After(200 * time.Millisecond):
 	}
 

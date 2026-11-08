@@ -42,6 +42,13 @@ type App struct {
 	readyOnce sync.Once
 	ready     chan struct{} // NewApp 初始化；Ready 时 close 广播
 	readyFlag atomic.Bool
+
+	// fail-fast 错误面（#133）：Fail 记录首个致命错误并触发关停；错误经
+	// Bootstrapper.Run 的返回值上抛（退出码非 0）。fatalCh 容量 1，Fail
+	// 永不阻塞（userFn 不监听 ctx 的裸 Spin 形态也能解除 Run 的 select）。
+	fatalMu  sync.Mutex
+	fatalErr error      // 首次 Fail 的错误；nil = 未记录（Fail(nil) 仅关停）
+	fatalCh  chan error // Run 的唤醒出口；容量 1，首次非 nil 错误投递
 }
 
 type namedCloser struct {
@@ -74,6 +81,7 @@ func NewApp(mgr *lifecycle.Manager) *App {
 		ctx:         ctx,
 		waitTimeout: defaultWaitTimeout,
 		ready:       make(chan struct{}),
+		fatalCh:     make(chan error, 1),
 	}
 
 	// 四个阶段独立注册，按注册顺序依次执行。
@@ -204,8 +212,53 @@ func (a *App) GoBackground(name string, fn func(ctx context.Context)) {
 // `<-app.Context().Done()` 的阻塞，使其返回并触发 lifecycle.Manager 的优雅
 // 关闭序列。幂等；在关闭序列中再次调用是安全的（cancel 本身幂等）。
 // 典型用途见 lifecycle.App.RequestShutdown。
+//
+// 注意：纯取消语义不携带失败原因——userFn 不监听 ctx（裸 h.Spin()）时 Run
+// 永不返回，userFn 监听 ctx 且返回 nil 时 Run 返回 nil（退出码 0）。需要
+// 「中止且退出码非 0」的 fail-fast 语义用 Fail（#133）。
 func (a *App) RequestShutdown() {
 	a.cancel()
+}
+
+// Fail 报告致命错误并触发关停（#133）：fail-fast 原语——等价
+// RequestShutdown 的关停触发，但错误经 Bootstrapper.Run 的返回值上抛
+// （进程退出码非 0），且 Run 阻塞在等待信号/userFn 返回时被立即解除，
+// userFn 无需监听 ctx（裸 h.Spin() 形态）即可被中止。
+//
+// 适用：启动期发现「服务不可用」必须早死（如延迟注册失败且 Required、
+// 就绪门超时且 ReadyFatal）——仅 RequestShutdown 的取消语义表达不了失败，
+// 部署门禁 / systemd Restart=on-failure / 对账链路会把启动失败当「成功」。
+//
+// 语义：
+//   - err == nil：仅触发关停（等同 RequestShutdown），不上抛错误；
+//   - 首个非 nil 错误生效（幂等，后续调用不覆盖；并发安全）；
+//   - userFn 已返回后调用同样生效：错误并入 Run 的返回值（runErr 优先，
+//     fatal 以「; fatal: 」附加，与 #80 的关停错误同级）。
+//
+// Run 返回后 Fail 不再有任何效果（进程退出在即，错误已并入返回值）。
+func (a *App) Fail(err error) {
+	a.fatalMu.Lock()
+	if a.fatalErr == nil {
+		a.fatalErr = err
+	}
+	deliver := a.fatalErr
+	a.fatalMu.Unlock()
+
+	if deliver != nil {
+		select {
+		case a.fatalCh <- deliver:
+		default: // 已投递过（幂等）：错误由 Run 的 fatalError 读回
+		}
+	}
+	a.cancel()
+}
+
+// fatalError 返回已记录的 fatal 错误（无则 nil）。供 Run 在任意关停出口
+// 合并检查——userFn 因 ctx 取消返回 nil 的形态也要带上 fatal 错误。
+func (a *App) fatalError() error {
+	a.fatalMu.Lock()
+	defer a.fatalMu.Unlock()
+	return a.fatalErr
 }
 
 // SetWaitTimeout 设置 GoBackground goroutine 的 drain 超时。
