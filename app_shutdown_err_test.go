@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,5 +51,57 @@ func TestRun_ShutdownErrorsSurfaceInReturn(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "db flush failed") {
 		t.Fatalf("返回值应携带关闭错误, got %v", err)
+	}
+}
+
+// TestApp_CloserPanic_IsolatedAndChainContinues 钉住 #132：closeAll 必须有
+// 逐 closer panic 隔离——某资源 Close 在停机竞态下 panic（nil 解引用之类）
+// 时转为错误并继续逆序链，其后的反注册/flush 不再被跳过。此前 panic 冲出
+// 循环，仅靠 close job 级 recover 兜住不炸进程，其后全部 closer 漏调——
+// 幽灵实例正是 closeAll 注释声称要消灭的东西。
+func TestApp_CloserPanic_IsolatedAndChainContinues(t *testing.T) {
+	mgr := lifecycle.New(2 * time.Second)
+	app := NewApp(mgr)
+
+	var afterPanicRan, lastRan atomic.Bool
+	app.AddResource("after-panic", func(context.Context) error {
+		afterPanicRan.Store(true)
+		return nil
+	})
+	app.AddResource("panics", func(context.Context) error {
+		panic("nil deref in teardown race")
+	})
+	app.AddResource("last", func(context.Context) error {
+		lastRan.Store(true)
+		return nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		mgr.Shutdown(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown 挂死：closer panic 击穿 closeAll（#132）")
+	}
+
+	if !afterPanicRan.Load() || !lastRan.Load() {
+		t.Fatal("closer panic 中断了逆序停机链，其后的 closer 被跳过（#132）")
+	}
+	// panic 转错误经 #80 链路上抛（退出码可感知），且带资源名
+	errs := mgr.Errors()
+	if len(errs) == 0 {
+		t.Fatal("closer panic 应转为关闭错误并上抛（#132）")
+	}
+	joined := false
+	for _, err := range errs {
+		if strings.Contains(err.Error(), "panics") && strings.Contains(err.Error(), "panicked") {
+			joined = true
+		}
+	}
+	if !joined {
+		t.Fatalf("panic 错误应带资源名与 panicked 标记, got %v", errs)
 	}
 }

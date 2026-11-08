@@ -66,8 +66,20 @@ func WithComponent(c Component) BootstrapperOption {
 
 // AddComponent 追加启动组件（动态注入）。
 // 导出以支持嵌套 module 与第三方实现注入，与 WithComponent 等价。
+//
+// ServiceNameAware 回填（#131）：New 之后调用时就地补做——New 强制
+// serviceName 非空，此后挂载的组件（嵌套 module 动态注入、第三方实现）
+// 与经 WithComponent 挂载的组件拿到服务名的时机一致，不再静默拿到空
+// 服务名。New 之前（选项应用阶段）调用时 serviceName 尚未定，回填留给
+// New 的统一回填；两条路径可能对同一组件各执行一次回填（同值重复），
+// ServiceNameAware 实现须幂等。
 func (b *Bootstrapper) AddComponent(c Component) {
 	b.components = append(b.components, c)
+	if b.serviceName != "" {
+		if s, ok := c.(ServiceNameAware); ok {
+			s.SetServiceName(b.serviceName)
+		}
+	}
 }
 
 // WithShutdownHook 添加自定义关闭钩子。
@@ -97,7 +109,9 @@ func WithBeforeServe(fn func() error) BootstrapperOption {
 }
 
 // ServiceNameAware 需要感知服务名的组件实现此接口；
-// New() 在应用完全部选项后统一回填（与 WithServiceName 的调用顺序无关）。
+// New() 在应用完全部选项后统一回填（与 WithServiceName 的调用顺序无关），
+// New 之后经 AddComponent 挂载的组件就地补做（#131）。实现须幂等——
+// 两条路径可能对同一组件各回填一次（同值）。
 // 嵌套 module 中的组件实现它即可参与回填，根包无需感知具体组件类型。
 type ServiceNameAware interface {
 	SetServiceName(name string)
@@ -146,7 +160,11 @@ func New(opts ...BootstrapperOption) (*Bootstrapper, error) {
 //
 //  4. 监听 SIGINT/SIGTERM
 //
-//  5. 优雅关闭
+//  5. 等待：userFn 返回、收到信号、或组件经 App.Fail 触发 fail-fast
+//     （#133：致命错误经返回值上抛，退出码非 0；userFn 不监听 ctx 时
+//     Run 也能被解除阻塞）
+//
+//  6. 优雅关闭
 func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	mgr := lifecycle.New(b.shutdownTimeout)
 	ctx := context.Background()
@@ -189,7 +207,10 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// 5. 等待：userFn 返回 或 收到信号
+	// 5. 等待：userFn 返回、收到信号 或 fatal fail-fast（#133）
+	// fatal 出口解除 Run 的阻塞——userFn 不监听 ctx（裸 h.Spin()）时
+	// RequestShutdown 的纯取消语义无法让 Run 返回（进程带 ERROR 日志
+	// 继续对外服务，假活）；Fail 的错误投递让 Run 立即进入关停。
 	var runErr error
 	select {
 	case sig := <-sigCh:
@@ -203,12 +224,42 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 			logger.Info("userFn returned, shutting down...")
 		}
 		signal.Stop(sigCh)
+	case err := <-app.fatalCh:
+		logger.Error("fatal error triggered shutdown", "err", err)
+		signal.Stop(sigCh)
 	}
 
 	// 6. 执行清理：每个任务使用自己的独立超时预算（WithShutdownTimeout
 	//    是单个任务的默认超时），此处传 Background 不做全局截断，
 	//    保证尾部任务（如 nns-deregister）拿到完整预算，不留幽灵实例
 	mgr.Shutdown(context.Background())
+
+	// #133：补收 userFn 错误 + fatal 错误上抛（退出码必须反映启动失败）。
+	//   - 补收：fatal 出口/信号出口赢得 select 时 userFn 可能稍后才返回
+	//     （Fail 先投递再 cancel，userFn 因 ctx 取消而返回的时序晚于 Run
+	//     醒来）——关停完成后再读 errCh，两条错误都不丢；userFn 永不返回
+	//     （被 fatal 强制中止的裸 Spin 形态）时非阻塞读直接跳过，不拖住关停。
+	//   - fatal 上抛：无论 Run 从哪个出口进入关停（userFn 因 ctx 取消返回
+	//     nil 的形态也必须带上 fatal 错误）。runErr 优先（业务错误是主因），
+	//     fatal 以「; fatal: 」附加。
+	if runErr == nil {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				logger.Error("userFn returned error during shutdown", "err", err)
+				runErr = err
+			}
+		default:
+		}
+	}
+	if ferr := app.fatalError(); ferr != nil {
+		logger.Error("fatal error during run", "err", ferr)
+		if runErr != nil {
+			runErr = fmt.Errorf("%w; fatal: %w", runErr, ferr)
+		} else {
+			runErr = ferr
+		}
+	}
 
 	// #80：关停错误上抛——资源关闭失败（DB flush 未落盘、连接未优雅断开）
 	// 时退出码必须反映关停质量，此前 runErr 只承载 userFn 错误，「带着未落盘

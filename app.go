@@ -42,6 +42,13 @@ type App struct {
 	readyOnce sync.Once
 	ready     chan struct{} // NewApp 初始化；Ready 时 close 广播
 	readyFlag atomic.Bool
+
+	// fail-fast 错误面（#133）：Fail 记录首个致命错误并触发关停；错误经
+	// Bootstrapper.Run 的返回值上抛（退出码非 0）。fatalCh 容量 1，Fail
+	// 永不阻塞（userFn 不监听 ctx 的裸 Spin 形态也能解除 Run 的 select）。
+	fatalMu  sync.Mutex
+	fatalErr error      // 首次 Fail 的错误；nil = 未记录（Fail(nil) 仅关停）
+	fatalCh  chan error // Run 的唤醒出口；容量 1，首次非 nil 错误投递
 }
 
 type namedCloser struct {
@@ -74,6 +81,7 @@ func NewApp(mgr *lifecycle.Manager) *App {
 		ctx:         ctx,
 		waitTimeout: defaultWaitTimeout,
 		ready:       make(chan struct{}),
+		fatalCh:     make(chan error, 1),
 	}
 
 	// 四个阶段独立注册，按注册顺序依次执行。
@@ -94,10 +102,15 @@ func NewApp(mgr *lifecycle.Manager) *App {
 	mgr.Add("app-lifecycle:close", func(ctx context.Context) error {
 		return a.closeAll(ctx) // #80：错误进 shutdownErrs，经 Run 上抛
 	}, 0)
+	// wait job 不设预算（timeout < 0，Manager 的「显式无超时」语义）：
+	// drain 时长只由 SetWaitTimeout 管辖（#134）——若用 Manager 默认预算
+	// （timeout=0 ⇒ WithShutdownTimeout，默认 10s），SetWaitTimeout(0) 的
+	// 「无限等待」乃至默认 30s drain 都会被静默砍到 10s，且无任何报错。
+	// ctx 仍作为显式中止信号传播（调用方 Shutdown(ctx) 取消时放弃等待）。
 	mgr.Add("app-lifecycle:wait", func(ctx context.Context) error {
 		a.timedWait(ctx)
 		return nil
-	}, 0)
+	}, -1)
 
 	return a
 }
@@ -142,11 +155,17 @@ func (a *App) AddResource(name string, closer func(context.Context) error) {
 // per-job 预算隔离语义，不必再手写 Manager↔App 适配层。
 //
 // 预算语义（对齐 Manager 的 per-job 超时）：
-//   - 预算从 Background 派生而非共享 close 阶段的全局预算：前序资源的
-//     耗时不会挤占本资源的预算。典型场景（octopus 停机编排）：outbox
-//     排空 20s / otel 摘除 10s / nns 注销 10s 三阶段独立预算——共享预算时
-//     outbox 卡住会吃光 nns 注销的预算，产生「已注册但永不反注册」的
-//     幽灵实例。
+//   - 预算完全独立（#135）：从 Background 派生，不与 close 阶段共享预算，
+//     也不被 close job 的预算（WithShutdownTimeout，默认 10s）封顶——
+//     timeout 大于 WithShutdownTimeout 时完整生效（文档示例「outbox 排空
+//     20s」在默认配置下成立）。代价是 close 阶段总时长可能超过
+//     WithShutdownTimeout（逐资源预算隔离 #75 的既定语义：总时长上界 =
+//     各资源预算之和）。调用方 Shutdown ctx 的取消同样不截断预算化
+//     closer；无独立预算的 closer（AddResource）仍受 close job 预算约束。
+//   - 前序资源的耗时不会挤占本资源的预算。典型场景（octopus 停机编排）：
+//     outbox 排空 20s / otel 摘除 10s / nns 注销 10s 三阶段独立预算——
+//     共享预算时 outbox 卡住会吃光 nns 注销的预算，产生「已注册但永不
+//     反注册」的幽灵实例。
 //   - 超时是协作式的：到点时 closer 收到已取消的 ctx，错误经 close 阶段
 //     聚合上抛（#80）；不感知 ctx 的 closer 无法被强杀，仍会阻塞 close 阶段。
 //   - timeout <= 0 表示不单独限时（等同 AddResource）。
@@ -193,13 +212,63 @@ func (a *App) GoBackground(name string, fn func(ctx context.Context)) {
 // `<-app.Context().Done()` 的阻塞，使其返回并触发 lifecycle.Manager 的优雅
 // 关闭序列。幂等；在关闭序列中再次调用是安全的（cancel 本身幂等）。
 // 典型用途见 lifecycle.App.RequestShutdown。
+//
+// 注意：纯取消语义不携带失败原因——userFn 不监听 ctx（裸 h.Spin()）时 Run
+// 永不返回，userFn 监听 ctx 且返回 nil 时 Run 返回 nil（退出码 0）。需要
+// 「中止且退出码非 0」的 fail-fast 语义用 Fail（#133）。
 func (a *App) RequestShutdown() {
 	a.cancel()
+}
+
+// Fail 报告致命错误并触发关停（#133）：fail-fast 原语——等价
+// RequestShutdown 的关停触发，但错误经 Bootstrapper.Run 的返回值上抛
+// （进程退出码非 0），且 Run 阻塞在等待信号/userFn 返回时被立即解除，
+// userFn 无需监听 ctx（裸 h.Spin() 形态）即可被中止。
+//
+// 适用：启动期发现「服务不可用」必须早死（如延迟注册失败且 Required、
+// 就绪门超时且 ReadyFatal）——仅 RequestShutdown 的取消语义表达不了失败，
+// 部署门禁 / systemd Restart=on-failure / 对账链路会把启动失败当「成功」。
+//
+// 语义：
+//   - err == nil：仅触发关停（等同 RequestShutdown），不上抛错误；
+//   - 首个非 nil 错误生效（幂等，后续调用不覆盖；并发安全）；
+//   - userFn 已返回后调用同样生效：错误并入 Run 的返回值（runErr 优先，
+//     fatal 以「; fatal: 」附加，与 #80 的关停错误同级）。
+//
+// Run 返回后 Fail 不再有任何效果（进程退出在即，错误已并入返回值）。
+func (a *App) Fail(err error) {
+	a.fatalMu.Lock()
+	if a.fatalErr == nil {
+		a.fatalErr = err
+	}
+	deliver := a.fatalErr
+	a.fatalMu.Unlock()
+
+	if deliver != nil {
+		select {
+		case a.fatalCh <- deliver:
+		default: // 已投递过（幂等）：错误由 Run 的 fatalError 读回
+		}
+	}
+	a.cancel()
+}
+
+// fatalError 返回已记录的 fatal 错误（无则 nil）。供 Run 在任意关停出口
+// 合并检查——userFn 因 ctx 取消返回 nil 的形态也要带上 fatal 错误。
+func (a *App) fatalError() error {
+	a.fatalMu.Lock()
+	defer a.fatalMu.Unlock()
+	return a.fatalErr
 }
 
 // SetWaitTimeout 设置 GoBackground goroutine 的 drain 超时。
 // 超时后 wg.Wait 被跳过，日志警告仍在运行的 goroutine 数量。
 // 默认 30s；传 0 禁用超时（无限等待，仅在确信所有 goroutine 会自行退出时使用）。
+//
+// drain 时长独立于 WithShutdownTimeout（#134）：wait job 在 lifecycle.Manager
+// 上不设预算，「0 = 无限等待」与默认 30s 都不会被 Manager 的默认 job 预算
+// （Bootstrapper 下即 WithShutdownTimeout）静默截断。中止源只有两个：本
+// 超时到点，与调用方显式取消 Shutdown 的 ctx。
 func (a *App) SetWaitTimeout(d time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -222,6 +291,9 @@ func (a *App) timedWait(ctx context.Context) {
 	})
 
 	if timeout <= 0 {
+		// 无限等待（SetWaitTimeout(0)，#134）：wait job 无预算，本 ctx 只会
+		// 因调用方显式取消 Shutdown 的 ctx 而 Done（Bootstrapper.Run 传
+		// Background，永不取消）——此时按「显式放弃等待」处理。
 		select {
 		case <-done:
 		case <-ctx.Done():
@@ -283,24 +355,31 @@ func (a *App) closeAll(ctx context.Context) error {
 	}
 }
 
-// runCloserWithBudget 执行单个 closer：独立超时预算 + 父 ctx 取消传播 +
-// 预算切片（#75）。语义对齐 core/lifecycle.Manager.runCloser。
+// runCloserWithBudget 执行单个 closer：独立超时预算 + panic 隔离 + 预算
+// 切片（#75）。语义对齐 core/lifecycle.Manager.runCloser 的隔离粒度。
 //
-// timeout <= 0 时不设独立预算，直接透传 close 阶段的 ctx。预算从
-// Background 派生而非从 parent 派生：前序资源的耗时不得挤占本资源的预算；
-// parent 的取消/超时作为外部中止信号同步取消本资源（AfterFunc）。
-func runCloserWithBudget(parent context.Context, c namedCloser) error {
+// timeout <= 0 时不设独立预算，直接透传 close 阶段的 ctx（受 close job
+// 预算约束）。timeout > 0 时预算完全自持（#135）：仅从 Background 派生，
+// 不挂 parent 的取消传播——close job 的预算（WithShutdownTimeout，默认
+// 10s）与调用方 Shutdown ctx 的取消都不得截断本资源，否则「独立预算」被
+// close job 预算静默封顶（文档的「outbox 排空 20s」示例在默认配置下不
+// 成立）。预算化 closer 的唯一中止源是自身 timeout 到点与 closer 的协作
+// 退出；前序资源的耗时同样不得挤占本资源的预算（Background 派生保证）。
+//
+// panic 隔离（#132，对齐 Manager 的 per-closer recover）：某资源 Close 在
+// 停机竞态下 panic 时转为错误（closeAll 会再包上资源名）并继续逆序链上
+// 的后续 closer——panic 冲出循环会让其后全部反注册/flush 被跳过，留下
+// closeAll 要消灭的注册中心幽灵实例。
+func runCloserWithBudget(parent context.Context, c namedCloser) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panicked: %v", r)
+		}
+	}()
 	if c.timeout <= 0 {
 		return c.closer(parent)
 	}
 	jobCtx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
-	if err := parent.Err(); err != nil {
-		// 调用方 ctx 已取消/超时：同步取消本资源，closer 立即观察到取消态
-		cancel()
-		return c.closer(jobCtx)
-	}
-	stop := context.AfterFunc(parent, cancel)
-	defer stop()
 	return c.closer(jobCtx)
 }

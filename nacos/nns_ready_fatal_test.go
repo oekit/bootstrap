@@ -12,7 +12,7 @@ import (
 )
 
 // TestNNSComponent_ReadyFatal_AbortsStartup 钉住 #74：ReadyFatal 开启后，看门狗
-// 超时**中止启动**（Init 挂的注册 goroutine 以 errReadyFatal 告终），而非只打
+// 超时**中止启动**（Init 挂的注册 goroutine 以 ErrReadyFatal 告终），而非只打
 // ERROR 继续静默降级。
 func TestNNSComponent_ReadyFatal_AbortsStartup(t *testing.T) {
 	fake := withFakeNNS(t)
@@ -30,7 +30,7 @@ func TestNNSComponent_ReadyFatal_AbortsStartup(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// 等待看门狗超时并触发 fatal 路径：注册状态应进入 PhaseFailed + errReadyFatal
+	// 等待看门狗超时并触发 fatal 路径：注册状态应进入 PhaseFailed + ErrReadyFatal
 	deadline := time.Now().Add(3 * time.Second)
 	var st *RegisterState
 	for time.Now().Before(deadline) {
@@ -42,8 +42,8 @@ func TestNNSComponent_ReadyFatal_AbortsStartup(t *testing.T) {
 	if st == nil || st.Phase != PhaseFailed {
 		t.Fatalf("ReadyFatal 超时后应进入 PhaseFailed, got %+v", st)
 	}
-	if !errors.Is(st.Err, errReadyFatal) {
-		t.Fatalf("Err 应可 errors.Is(errReadyFatal), got %v", st.Err)
+	if !errors.Is(st.Err, ErrReadyFatal) {
+		t.Fatalf("Err 应可 errors.Is(ErrReadyFatal), got %v", st.Err)
 	}
 	if n := fake.registerCount(); n != 0 {
 		t.Fatalf("fatal 路径不应注册, got %d", n)
@@ -80,7 +80,7 @@ func TestWithReadyFatal_GlobalOption(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if st := comp.RegistrationState(); st != nil && st.Phase == PhaseFailed {
-			if !errors.Is(st.Err, errReadyFatal) {
+			if !errors.Is(st.Err, ErrReadyFatal) {
 				t.Fatalf("全局选项应触发 fatal 哨兵, got %v", st.Err)
 			}
 			mgr.Shutdown(context.Background())
