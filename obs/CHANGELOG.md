@@ -66,6 +66,36 @@
 
 - build: 跟随 bootstrap v0.6.3 发版（矩阵依赖地板对齐轮；父模块地板 v0.6.2 → v0.6.3）
 
+## [v0.2.7] — 2026-10-18
+
+- build: 嵌套地板 bootstrap v0.6.1 → v0.6.2（audit 嵌套地板门禁首发抓漏，matrix-tools#6）
+
+关联问题单：matrix-tools#6。
+
+## [v0.2.6] — 2026-10-18
+
+- build: 全部 oekit 依赖地板对齐最新——bootstrap v0.6.1、core v0.7.0、logx v0.6.0、metrics v0.1.7、tracing v0.2.2
+
+## [v0.2.5] — 2026-10-17
+
+- build: bootstrap v0.5.3 地板跟随
+
+## [v0.2.4] — 2026-10-17
+
+- build: concurrency 地板 v0.5.4
+
+## [v0.2.3] — 2026-10-17
+
+- build: core 转直接依赖（obs.go 迁移 core/lifecycle 后的 tidy 归位，CI tidy 门禁）；bootstrap 地板 v0.5.2
+
+## [v0.2.1] — 2026-10-17
+
+- build: 嵌套地板全量对齐最新——bootstrap v0.5.1、logx v0.5.0、metrics v0.1.6、tracing v0.2.1；go 1.26.0（tracing/OTel 生态传导）
+
+## [v0.2.0] — 2026-10-17
+
+- 首版嵌套模块：随仓库结构重置（bootstrap 包提升至模块根）自根包拆出——module github.com/oekit/bootstrap/obs，行为与拆分前一致
+
 ## [v0.1.0] — 2026-10-15
 
 - 首版：自 bootstrap 根包迁入（行为不变）
