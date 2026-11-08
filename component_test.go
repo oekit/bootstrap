@@ -227,3 +227,74 @@ func TestNew_ComponentInitPanic_ConvertedToError(t *testing.T) {
 		t.Fatal("expected rollback to run shutdown hooks of earlier components")
 	}
 }
+
+// serviceNameAwareComponent 是 ServiceNameAware 的最小实现，记录回填次数
+// 与取值（幂等实现：SetServiceName 只覆写同名字段）。
+type serviceNameAwareComponent struct {
+	mockComponent
+	mu       sync.Mutex
+	svcName  string
+	setCalls int
+}
+
+func (m *serviceNameAwareComponent) SetServiceName(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.svcName = name
+	m.setCalls++
+}
+
+func (m *serviceNameAwareComponent) snapshot() (string, int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.svcName, m.setCalls
+}
+
+// TestAddComponent_AfterNew_BackfillsServiceName 钉住 #131：New 之后经
+// AddComponent 挂载的 ServiceNameAware 组件必须就地回填服务名——此前
+// 回填只发生在 New 内部，后挂组件静默拿到空服务名且无任何信号，与
+// 「与 WithComponent 等价」的注释承诺不符。
+func TestAddComponent_AfterNew_BackfillsServiceName(t *testing.T) {
+	b, err := New(WithServiceName("late-svc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	aware := &serviceNameAwareComponent{mockComponent: mockComponent{name: "aware"}}
+	b.AddComponent(aware)
+
+	name, calls := aware.snapshot()
+	if name != "late-svc" {
+		t.Fatalf("New 后挂载的组件应回填服务名, got %q (#131)", name)
+	}
+	if calls != 1 {
+		t.Fatalf("SetServiceName 调用次数 = %d, want 1", calls)
+	}
+}
+
+// TestAddComponent_BeforeServiceName_FilledByNew 钉住选项路径：New 之前
+// 挂载（WithComponent 先于 WithServiceName）时由 New 的统一回填兜底
+// （既有行为回归钉），且与 AddComponent 的就地回填叠加后同值幂等。
+func TestAddComponent_BeforeServiceName_FilledByNew(t *testing.T) {
+	aware := &serviceNameAwareComponent{mockComponent: mockComponent{name: "aware"}}
+	// WithServiceName 在前：AddComponent 就地回填 + New 统一回填（幂等，两次同值）
+	if _, err := New(WithServiceName("opt-svc"), WithComponent(aware)); err != nil {
+		t.Fatal(err)
+	}
+	name, _ := aware.snapshot()
+	if name != "opt-svc" {
+		t.Fatalf("选项路径组件应拿到服务名, got %q", name)
+	}
+
+	aware2 := &serviceNameAwareComponent{mockComponent: mockComponent{name: "aware2"}}
+	// WithComponent 在前：AddComponent 时 serviceName 未定，由 New 回填
+	if _, err := New(WithComponent(aware2), WithServiceName("opt-svc-2")); err != nil {
+		t.Fatal(err)
+	}
+	name2, calls2 := aware2.snapshot()
+	if name2 != "opt-svc-2" {
+		t.Fatalf("WithComponent 先于 WithServiceName 时应由 New 回填, got %q", name2)
+	}
+	if calls2 != 1 {
+		t.Fatalf("SetServiceName 调用次数 = %d, want 1", calls2)
+	}
+}

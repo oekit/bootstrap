@@ -66,8 +66,20 @@ func WithComponent(c Component) BootstrapperOption {
 
 // AddComponent 追加启动组件（动态注入）。
 // 导出以支持嵌套 module 与第三方实现注入，与 WithComponent 等价。
+//
+// ServiceNameAware 回填（#131）：New 之后调用时就地补做——New 强制
+// serviceName 非空，此后挂载的组件（嵌套 module 动态注入、第三方实现）
+// 与经 WithComponent 挂载的组件拿到服务名的时机一致，不再静默拿到空
+// 服务名。New 之前（选项应用阶段）调用时 serviceName 尚未定，回填留给
+// New 的统一回填；两条路径可能对同一组件各执行一次回填（同值重复），
+// ServiceNameAware 实现须幂等。
 func (b *Bootstrapper) AddComponent(c Component) {
 	b.components = append(b.components, c)
+	if b.serviceName != "" {
+		if s, ok := c.(ServiceNameAware); ok {
+			s.SetServiceName(b.serviceName)
+		}
+	}
 }
 
 // WithShutdownHook 添加自定义关闭钩子。
@@ -97,7 +109,9 @@ func WithBeforeServe(fn func() error) BootstrapperOption {
 }
 
 // ServiceNameAware 需要感知服务名的组件实现此接口；
-// New() 在应用完全部选项后统一回填（与 WithServiceName 的调用顺序无关）。
+// New() 在应用完全部选项后统一回填（与 WithServiceName 的调用顺序无关），
+// New 之后经 AddComponent 挂载的组件就地补做（#131）。实现须幂等——
+// 两条路径可能对同一组件各回填一次（同值）。
 // 嵌套 module 中的组件实现它即可参与回填，根包无需感知具体组件类型。
 type ServiceNameAware interface {
 	SetServiceName(name string)
