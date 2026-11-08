@@ -2,6 +2,16 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.0] — 2026-11-09
+
+- fix(app): closer panic 隔离——坏 Close 不再中断逆序停机链（#132）
+- fix(bootstrapper): AddComponent 就地回填 ServiceNameAware（#131）
+- feat(app): App.Fail 显式失败出口——ReadyFatal/Required 注册失败真正中止 Run（#133）
+- fix(app): SetWaitTimeout(0)/AddResourceTimeout 与 shutdown 预算解耦（#134 #135）
+- feat(nacos): Register 取消 best-effort 反注册 + PhaseAbandoned 阶段（#136）
+
+关联问题单：bootstrap#131、bootstrap#132、bootstrap#133、bootstrap#134、bootstrap#135、bootstrap#136。
+
 ## [nacos/v0.3.20] — 2026-11-08
 
 - build: 依赖地板对齐——本版把 oekit 依赖地板抬到各依赖当前最新已发布版本（matrix-tools/scripts/align_floors.py 维护轮）
