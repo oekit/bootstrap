@@ -94,10 +94,15 @@ func NewApp(mgr *lifecycle.Manager) *App {
 	mgr.Add("app-lifecycle:close", func(ctx context.Context) error {
 		return a.closeAll(ctx) // #80：错误进 shutdownErrs，经 Run 上抛
 	}, 0)
+	// wait job 不设预算（timeout < 0，Manager 的「显式无超时」语义）：
+	// drain 时长只由 SetWaitTimeout 管辖（#134）——若用 Manager 默认预算
+	// （timeout=0 ⇒ WithShutdownTimeout，默认 10s），SetWaitTimeout(0) 的
+	// 「无限等待」乃至默认 30s drain 都会被静默砍到 10s，且无任何报错。
+	// ctx 仍作为显式中止信号传播（调用方 Shutdown(ctx) 取消时放弃等待）。
 	mgr.Add("app-lifecycle:wait", func(ctx context.Context) error {
 		a.timedWait(ctx)
 		return nil
-	}, 0)
+	}, -1)
 
 	return a
 }
@@ -200,6 +205,11 @@ func (a *App) RequestShutdown() {
 // SetWaitTimeout 设置 GoBackground goroutine 的 drain 超时。
 // 超时后 wg.Wait 被跳过，日志警告仍在运行的 goroutine 数量。
 // 默认 30s；传 0 禁用超时（无限等待，仅在确信所有 goroutine 会自行退出时使用）。
+//
+// drain 时长独立于 WithShutdownTimeout（#134）：wait job 在 lifecycle.Manager
+// 上不设预算，「0 = 无限等待」与默认 30s 都不会被 Manager 的默认 job 预算
+// （Bootstrapper 下即 WithShutdownTimeout）静默截断。中止源只有两个：本
+// 超时到点，与调用方显式取消 Shutdown 的 ctx。
 func (a *App) SetWaitTimeout(d time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -222,6 +232,9 @@ func (a *App) timedWait(ctx context.Context) {
 	})
 
 	if timeout <= 0 {
+		// 无限等待（SetWaitTimeout(0)，#134）：wait job 无预算，本 ctx 只会
+		// 因调用方显式取消 Shutdown 的 ctx 而 Done（Bootstrapper.Run 传
+		// Background，永不取消）——此时按「显式放弃等待」处理。
 		select {
 		case <-done:
 		case <-ctx.Done():
