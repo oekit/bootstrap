@@ -147,11 +147,17 @@ func (a *App) AddResource(name string, closer func(context.Context) error) {
 // per-job 预算隔离语义，不必再手写 Manager↔App 适配层。
 //
 // 预算语义（对齐 Manager 的 per-job 超时）：
-//   - 预算从 Background 派生而非共享 close 阶段的全局预算：前序资源的
-//     耗时不会挤占本资源的预算。典型场景（octopus 停机编排）：outbox
-//     排空 20s / otel 摘除 10s / nns 注销 10s 三阶段独立预算——共享预算时
-//     outbox 卡住会吃光 nns 注销的预算，产生「已注册但永不反注册」的
-//     幽灵实例。
+//   - 预算完全独立（#135）：从 Background 派生，不与 close 阶段共享预算，
+//     也不被 close job 的预算（WithShutdownTimeout，默认 10s）封顶——
+//     timeout 大于 WithShutdownTimeout 时完整生效（文档示例「outbox 排空
+//     20s」在默认配置下成立）。代价是 close 阶段总时长可能超过
+//     WithShutdownTimeout（逐资源预算隔离 #75 的既定语义：总时长上界 =
+//     各资源预算之和）。调用方 Shutdown ctx 的取消同样不截断预算化
+//     closer；无独立预算的 closer（AddResource）仍受 close job 预算约束。
+//   - 前序资源的耗时不会挤占本资源的预算。典型场景（octopus 停机编排）：
+//     outbox 排空 20s / otel 摘除 10s / nns 注销 10s 三阶段独立预算——
+//     共享预算时 outbox 卡住会吃光 nns 注销的预算，产生「已注册但永不
+//     反注册」的幽灵实例。
 //   - 超时是协作式的：到点时 closer 收到已取消的 ctx，错误经 close 阶段
 //     聚合上抛（#80）；不感知 ctx 的 closer 无法被强杀，仍会阻塞 close 阶段。
 //   - timeout <= 0 表示不单独限时（等同 AddResource）。
@@ -296,12 +302,16 @@ func (a *App) closeAll(ctx context.Context) error {
 	}
 }
 
-// runCloserWithBudget 执行单个 closer：独立超时预算 + panic 隔离 +
-// 预算切片（#75）。语义对齐 core/lifecycle.Manager.runCloser 的隔离粒度。
+// runCloserWithBudget 执行单个 closer：独立超时预算 + panic 隔离 + 预算
+// 切片（#75）。语义对齐 core/lifecycle.Manager.runCloser 的隔离粒度。
 //
-// timeout <= 0 时不设独立预算，直接透传 close 阶段的 ctx。预算从
-// Background 派生而非从 parent 派生：前序资源的耗时不得挤占本资源的预算；
-// parent 的取消/超时作为外部中止信号同步取消本资源（AfterFunc）。
+// timeout <= 0 时不设独立预算，直接透传 close 阶段的 ctx（受 close job
+// 预算约束）。timeout > 0 时预算完全自持（#135）：仅从 Background 派生，
+// 不挂 parent 的取消传播——close job 的预算（WithShutdownTimeout，默认
+// 10s）与调用方 Shutdown ctx 的取消都不得截断本资源，否则「独立预算」被
+// close job 预算静默封顶（文档的「outbox 排空 20s」示例在默认配置下不
+// 成立）。预算化 closer 的唯一中止源是自身 timeout 到点与 closer 的协作
+// 退出；前序资源的耗时同样不得挤占本资源的预算（Background 派生保证）。
 //
 // panic 隔离（#132，对齐 Manager 的 per-closer recover）：某资源 Close 在
 // 停机竞态下 panic 时转为错误（closeAll 会再包上资源名）并继续逆序链上
@@ -318,12 +328,5 @@ func runCloserWithBudget(parent context.Context, c namedCloser) (err error) {
 	}
 	jobCtx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
-	if err := parent.Err(); err != nil {
-		// 调用方 ctx 已取消/超时：同步取消本资源，closer 立即观察到取消态
-		cancel()
-		return c.closer(jobCtx)
-	}
-	stop := context.AfterFunc(parent, cancel)
-	defer stop()
 	return c.closer(jobCtx)
 }

@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -96,5 +97,54 @@ func TestRun_DefaultWaitTimeout_NotCappedByShutdownTimeout(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run 挂死")
+	}
+}
+
+// TestApp_AddResourceTimeout_NotCappedByCloseJobBudget 钉住 #135：独立预算
+// 不被 close job 预算（WithShutdownTimeout，默认 10s）封顶——octopus 停机
+// 编排场景：close job 预算先被前序资源耗尽后，预算化资源仍拿到完整个人
+// 预算，其后的资源也仍被执行。此前 runCloserWithBudget 挂 AfterFunc(parent)，
+// close job 预算到点同步取消所有预算化 closer，「outbox 排空 20s」在默认
+// 配置下只拿到 10s 且无任何报错。
+func TestApp_AddResourceTimeout_NotCappedByCloseJobBudget(t *testing.T) {
+	mgr := lifecycle.New(150 * time.Millisecond) // close job 预算（模拟默认 10s 被前序资源耗尽的形态）
+	app := NewApp(mgr)
+
+	start := time.Now()
+	var outboxElapsed atomic.Int64
+	var afterRan atomic.Bool
+	// 注册序 = [nns-deregister, outbox] ⇒ 逆序执行 = outbox（预算化、慢）先跑，
+	// nns-deregister 在 close job 预算到点之后执行——正是 octopus 编排形态。
+	app.AddResource("nns-deregister", func(context.Context) error {
+		afterRan.Store(true) // close job 预算到点后仍必须执行
+		return nil
+	})
+	app.AddResourceTimeout("outbox", 600*time.Millisecond, func(ctx context.Context) error {
+		<-ctx.Done() // 预算到点（而非 close job 预算）才被切断
+		outboxElapsed.Store(int64(time.Since(start)))
+		return ctx.Err()
+	})
+
+	done := make(chan struct{})
+	go func() {
+		mgr.Shutdown(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown 挂死")
+	}
+
+	if got := time.Duration(outboxElapsed.Load()); got < 600*time.Millisecond {
+		t.Fatalf("outbox closer 只跑了 %v——独立预算被 close job 预算封顶（#135）", got)
+	}
+	if !afterRan.Load() {
+		t.Fatal("close job 预算到点后，后续资源的 closer 未执行（#135）")
+	}
+	// outbox 超自己预算的错误仍经 #80 链路上抛（退出码可感知）
+	errs := mgr.Errors()
+	if len(errs) == 0 || !errors.Is(errs[0], context.DeadlineExceeded) {
+		t.Fatalf("outbox 超预算错误应上抛, got %v", errs)
 	}
 }
