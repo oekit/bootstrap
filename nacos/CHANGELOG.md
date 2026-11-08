@@ -84,7 +84,17 @@
 
 - build: 跟随 bootstrap v0.6.3 发版（矩阵依赖地板对齐轮；父模块地板 v0.6.2 → v0.6.3）
 
-## [nacos/v0.3.0] — 2026-10-17
+## [v0.3.2] — 2026-10-18
+
+- build: 嵌套地板 bootstrap v0.6.1 → v0.6.2（audit 嵌套地板门禁首发抓漏，matrix-tools#6）
+
+关联问题单：matrix-tools#6。
+
+## [v0.3.1] — 2026-10-18
+
+- build: 全部 oekit 依赖地板对齐最新——bootstrap v0.6.1、core v0.7.0、logx v0.6.0、nns v0.4.1、registry v0.4.1
+
+## [v0.3.0] — 2026-10-17
 
 ### Breaking
 - **注册时机变更**：`WithNNS`/`WithRequiredNNS` 的服务注册由组件 Init 阶段延迟到
@@ -95,6 +105,30 @@
   逆序释放，关停序为 nns-deregister → server.Shutdown（对齐 go-kratos Stop 语义；
   旧实现 server 已关闭后才反注册）
 - 依赖升级：nns v0.4.0 / registry v0.4.0（双仓包提升至模块根）
+
+## [v0.2.5] — 2026-10-17
+
+- build: bootstrap v0.5.3、nns v0.3.5 地板跟随
+
+## [v0.2.4] — 2026-10-17
+
+- build: concurrency 地板 v0.5.4
+
+## [v0.2.3] — 2026-10-17
+
+- build: bootstrap 地板 v0.5.1 → v0.5.2（lifecycle 迁移版）
+
+## [v0.2.2] — 2026-10-17
+
+- fix(lifecycle): nns.go 迁移 logx/shutdown → core/lifecycle（父仓 shutdown 迁移同步，SA1019 清零）
+
+## [v0.2.1] — 2026-10-17
+
+- build: 嵌套地板全量对齐最新——bootstrap v0.5.1、core v0.6.0、logx v0.5.0、nns v0.3.4、registry v0.3.1；go 1.25.0（nacos-sdk 生态要求）
+
+## [v0.2.0] — 2026-10-17
+
+- 首版嵌套模块：随仓库结构重置（bootstrap 包提升至模块根）自根包拆出——module github.com/oekit/bootstrap/nacos，行为与拆分前一致
 
 ## [v0.1.0] — 2026-10-15
 
