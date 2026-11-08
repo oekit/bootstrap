@@ -283,13 +283,23 @@ func (a *App) closeAll(ctx context.Context) error {
 	}
 }
 
-// runCloserWithBudget 执行单个 closer：独立超时预算 + 父 ctx 取消传播 +
-// 预算切片（#75）。语义对齐 core/lifecycle.Manager.runCloser。
+// runCloserWithBudget 执行单个 closer：独立超时预算 + panic 隔离 +
+// 预算切片（#75）。语义对齐 core/lifecycle.Manager.runCloser 的隔离粒度。
 //
 // timeout <= 0 时不设独立预算，直接透传 close 阶段的 ctx。预算从
 // Background 派生而非从 parent 派生：前序资源的耗时不得挤占本资源的预算；
 // parent 的取消/超时作为外部中止信号同步取消本资源（AfterFunc）。
-func runCloserWithBudget(parent context.Context, c namedCloser) error {
+//
+// panic 隔离（#132，对齐 Manager 的 per-closer recover）：某资源 Close 在
+// 停机竞态下 panic 时转为错误（closeAll 会再包上资源名）并继续逆序链上
+// 的后续 closer——panic 冲出循环会让其后全部反注册/flush 被跳过，留下
+// closeAll 要消灭的注册中心幽灵实例。
+func runCloserWithBudget(parent context.Context, c namedCloser) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panicked: %v", r)
+		}
+	}()
 	if c.timeout <= 0 {
 		return c.closer(parent)
 	}
