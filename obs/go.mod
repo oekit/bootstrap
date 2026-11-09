@@ -3,11 +3,11 @@ module github.com/oekit/bootstrap/obs
 go 1.26.0
 
 require (
-	github.com/oekit/bootstrap v0.6.16
+	github.com/oekit/bootstrap v0.7.0
 	github.com/oekit/core v0.13.5
 	github.com/oekit/logx v0.8.12
-	github.com/oekit/metrics v0.1.17
-	github.com/oekit/tracing v0.3.8
+	github.com/oekit/metrics v0.2.0
+	github.com/oekit/tracing v0.3.9
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 )
@@ -21,7 +21,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/oekit/concurrency v0.30.1 // indirect
+	github.com/oekit/concurrency v0.31.0 // indirect
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
