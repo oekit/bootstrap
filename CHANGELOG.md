@@ -2,6 +2,12 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.1] — 2026-11-10
+
+- - fix: Run 关停后 userFn 晚到错误改为带界等待补收（2s grace），不再静默丢弃；界外如实声明（#141）
+
+关联问题单：bootstrap#141。
+
 ## [v0.7.0] — 2026-11-09
 
 - fix(app): closer panic 隔离——坏 Close 不再中断逆序停机链（#132）
