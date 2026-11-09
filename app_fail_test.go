@@ -38,9 +38,12 @@ func TestRun_Fail_UnblocksRunAndReturnsError(t *testing.T) {
 		if !errors.Is(err, errBoom) {
 			t.Fatalf("Run 应返回 Fail 的错误, got %v（#133 场景 A）", err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("Fail 后 Run 仍阻塞——裸 Spin 形态 fail-fast 失效（#133 场景 A）")
 	}
+	// #141 起该形态的返回时点 = 关停完成 + lateUserFnErrGrace（userFn 永不
+	// 返回，补收窗口到点即返回）：守护上限从 3s 放宽到 10s，防慢 CI 误报；
+	// 断言本身（Run 必须返回且携带 fatal 错误）不变。
 }
 
 // TestRun_Fail_WhileUserFnListensContext 钉住 #133 场景 B：userFn 监听 ctx
@@ -148,5 +151,40 @@ func TestApp_Fail_AfterUserFnReturned(t *testing.T) {
 	app.Fail(errors.New("second"))
 	if got := app.fatalError(); !errors.Is(got, errBoom) {
 		t.Fatalf("首个错误应生效, got %v", got)
+	}
+}
+
+// TestRun_LateUserFnErrorCollectedWithinGrace 回归（#141）：fatal 出口唤醒
+// Run 后，userFn **晚于关停完成**才返回的错误必须并入返回值——此前补收是
+// 非阻塞读，慢 flush/慢回滚形态（issue 实测 400ms 后返回）的错误被静默丢弃，
+// 退出码只反映 fatal，关停期的业务失败对部署门禁不可见（正是 #80/#133 要防
+// 的事）。修复后关停完成后再等 lateUserFnErrGrace 小窗口补收，fatal 错误
+// 以「; fatal: 」附加、两条都可辨。
+func TestRun_LateUserFnErrorCollectedWithinGrace(t *testing.T) {
+	b, err := New(WithServiceName("late-err-svc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	errLate := errors.New("shutdown flush failed")
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- b.Run(func(a *App) error {
+			a.Fail(errBoom)                    // fatal 出口唤醒 Run
+			time.Sleep(400 * time.Millisecond) // 慢 flush 形态：晚于关停完成才返回
+			return errLate
+		})
+	}()
+
+	select {
+	case err := <-runDone:
+		if !errors.Is(err, errLate) {
+			t.Fatalf("晚于关停完成的 userFn 错误应并入返回值（#141）, got %v", err)
+		}
+		if !errors.Is(err, errBoom) {
+			t.Fatalf("fatal 错误仍应可辨（runErr 优先、fatal 附加）, got %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run 挂死")
 	}
 }

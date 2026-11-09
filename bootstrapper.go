@@ -16,6 +16,14 @@ import (
 
 var logger = logx.Delegating("bootstrap")
 
+// lateUserFnErrGrace 是 #141 补收晚到 userFn 错误的等待窗口：fatal/信号出口
+// 赢得首个 select 时 userFn 可能稍后才返回（慢 flush、慢回滚等形态，issue
+// 实测 400ms）——关停完成后再等这个固定小窗口补收其错误；窗口耗尽仍未
+// 返回则如实放弃（更晚的错误无法再并入返回值，goroutine 对 buffered chan
+// 的投递不阻塞、不泄漏）。取值覆盖常见的「ctx 取消 → userFn 收尾返回」
+// 延迟，又不给裸 Spin 强制中止形态的退出增加可感知停顿（治理类 ≤60s 上限内）。
+const lateUserFnErrGrace = 2 * time.Second
+
 // Bootstrapper 是组件化应用编排器。
 //
 // 通过函数选项配置启动组件；重量级集成（Nacos/NNS、Prometheus/OTel）
@@ -164,7 +172,9 @@ func New(opts ...BootstrapperOption) (*Bootstrapper, error) {
 //     （#133：致命错误经返回值上抛，退出码非 0；userFn 不监听 ctx 时
 //     Run 也能被解除阻塞）
 //
-//  6. 优雅关闭
+//  6. 优雅关闭；关停完成后再等一个固定小窗口（lateUserFnErrGrace）补收
+//     晚于关停完成才返回的 userFn 错误——界内不丢、界外如实声明丢弃
+//     （#141，此前非阻塞读连关停期间返回的错误都接不住）
 func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	mgr := lifecycle.New(b.shutdownTimeout)
 	ctx := context.Background()
@@ -212,11 +222,13 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	// RequestShutdown 的纯取消语义无法让 Run 返回（进程带 ERROR 日志
 	// 继续对外服务，假活）；Fail 的错误投递让 Run 立即进入关停。
 	var runErr error
+	errChDrained := false // userFn 出口下 errCh 已被消费——此后不可能再有投递
 	select {
 	case sig := <-sigCh:
 		logger.Info("received signal, shutting down...", "signal", sig)
 		signal.Stop(sigCh)
 	case err := <-errCh:
+		errChDrained = true
 		runErr = err
 		if err != nil {
 			logger.Error("userFn returned error", "err", err)
@@ -237,19 +249,26 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	// #133：补收 userFn 错误 + fatal 错误上抛（退出码必须反映启动失败）。
 	//   - 补收：fatal 出口/信号出口赢得 select 时 userFn 可能稍后才返回
 	//     （Fail 先投递再 cancel，userFn 因 ctx 取消而返回的时序晚于 Run
-	//     醒来）——关停完成后再读 errCh，两条错误都不丢；userFn 永不返回
-	//     （被 fatal 强制中止的裸 Spin 形态）时非阻塞读直接跳过，不拖住关停。
+	//     醒来；慢 flush/慢回滚形态甚至晚于关停完成，#141）。仅当首个
+	//     select 未消费 errCh 时补收（userFn 出口下 errCh 已被消费，此后
+	//     不可能再有投递），且改为**带界等待**：关停完成后再等一个固定
+	//     小窗口（lateUserFnErrGrace），界内返回的错误不丢。此前的非阻塞
+	//     读连「关停期间返回」都接不住——注释声称「两条错误都不丢」实测
+	//     不成立，退出码只反映 fatal。窗口耗尽仍未返回时**如实声明丢弃**：
+	//     更晚的错误无法再并入返回值，goroutine 对 buffered chan 的投递
+	//     不阻塞、不泄漏；userFn 永不返回（被 fatal 强制中止的裸 Spin
+	//     形态）时窗口到点即返回，不拖住关停。
 	//   - fatal 上抛：无论 Run 从哪个出口进入关停（userFn 因 ctx 取消返回
 	//     nil 的形态也必须带上 fatal 错误）。runErr 优先（业务错误是主因），
 	//     fatal 以「; fatal: 」附加。
-	if runErr == nil {
+	if runErr == nil && !errChDrained {
 		select {
 		case err := <-errCh:
 			if err != nil {
-				logger.Error("userFn returned error during shutdown", "err", err)
+				logger.Error("userFn returned error during shutdown", logx.ErrKey, err)
 				runErr = err
 			}
-		default:
+		case <-time.After(lateUserFnErrGrace):
 		}
 	}
 	if ferr := app.fatalError(); ferr != nil {
