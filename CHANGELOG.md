@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.4] — 2026-11-10
+
+- - build: 依赖地板对齐（第二轮发版后 floor sync，无代码变更）
+
 ## [obs/v0.2.24] — 2026-11-10
 
 - - build: 嵌套自依赖对齐——bootstrap v0.7.3（floor sync，无代码变更）
