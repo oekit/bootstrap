@@ -2,6 +2,11 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.6] — 2026-11-11
+
+- - fix: WithShutdownHook 关闭钩子改为前置窗口——drain 之后、AddResource 资源关闭之前执行（flush/WAL 摘要/许可证类钩子的依赖资源仍在位），不再静默排到 app-lifecycle:wait 之后；ShutdownHookComponent 新增 Late 字段显式选择旧晚窗位置（#168）
+- - fix: 启动失败回滚（组件 Init 失败 / beforeServe 失败）的回滚期关停错误并入 Run 返回值（"; rollback: " 附加，errors.Join 保持 errors.Is 可分流），不再只进日志（#169）
+
 ## [v0.7.5] — 2026-11-11
 
 - - build: 依赖地板对齐（floor sync，无代码变更）

@@ -91,6 +91,11 @@ func (b *Bootstrapper) AddComponent(c Component) {
 }
 
 // WithShutdownHook 添加自定义关闭钩子。
+//
+// 执行窗口（#168）：drain 之后、AddResource 资源关闭**之前**——flush 指标/
+// 写 WAL 摘要/释放许可证类钩子的依赖资源（DB/连接）此刻仍在位。需要
+// 「全部资源关闭与后台排空之后」的晚窗时用
+// WithComponent(&ShutdownHookComponent{..., Late: true})。
 func WithShutdownHook(name string, hook func(ctx context.Context) error) BootstrapperOption {
 	return WithComponent(&ShutdownHookComponent{ComponentName: name, Hook: hook})
 }
@@ -186,16 +191,14 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	//    否则 tracing exporter 等资源会泄漏到进程结束
 	for _, c := range b.components {
 		if err := safeInit(c, ctx, app, mgr); err != nil {
-			mgr.Shutdown(context.Background())
-			return fmt.Errorf("bootstrap: component %s init failed: %w", c.Name(), err)
+			return b.rollback(mgr, fmt.Errorf("bootstrap: component %s init failed: %w", c.Name(), err))
 		}
 	}
 
 	// 2.5 BeforeServe 钩子：引擎启动前的定制准备（listener 收养/pid 交接等）
 	for i, fn := range b.beforeServe {
 		if err := fn(); err != nil {
-			mgr.Shutdown(context.Background())
-			return fmt.Errorf("bootstrap: beforeServe[%d] failed: %w", i, err)
+			return b.rollback(mgr, fmt.Errorf("bootstrap: beforeServe[%d] failed: %w", i, err))
 		}
 	}
 
@@ -293,6 +296,22 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 		return joined
 	}
 	return runErr
+}
+
+// rollback 执行启动失败回滚并把回滚期关停错误并入返回值（#169）。
+//
+// 与 #80 的正常关停面同口径：回滚期 closer 失败（exporter flush、临时
+// 目录/许可证释放）不得只进日志——systemd/K8s 的失败通知只带 return err，
+// 多组件启动失败的根因与回滚失败互相掩盖，回滚泄漏（fd/goroutine/注册
+// 残留）对部署门禁不可见。cause 是主因（init/beforeServe 错误），
+// 回滚期关停错误以「; rollback: 」附加，errors.Join 保持可 errors.Is 分流。
+func (b *Bootstrapper) rollback(mgr *lifecycle.Manager, cause error) error {
+	mgr.Shutdown(context.Background())
+	if rollbackErrs := mgr.Errors(); len(rollbackErrs) > 0 {
+		logger.Error("rollback errors during resource teardown", "count", len(rollbackErrs), "errs", rollbackErrs)
+		return fmt.Errorf("%w; rollback: %w", cause, errors.Join(rollbackErrs...))
+	}
+	return cause
 }
 
 // safeInit 执行组件 Init 并隔离 panic：组件初始化 panic 转为 error，
