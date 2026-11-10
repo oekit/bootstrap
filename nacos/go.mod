@@ -3,12 +3,12 @@ module github.com/oekit/bootstrap/nacos
 go 1.24.0
 
 require (
-	github.com/oekit/bootstrap v0.7.4
-	github.com/oekit/core v0.14.0
+	github.com/oekit/bootstrap v0.7.6
+	github.com/oekit/core v0.14.1
 	github.com/oekit/logx v0.9.2
-	github.com/oekit/nns v0.5.17
-	github.com/oekit/registry v0.5.13
-	github.com/oekit/registry/nacos v0.1.12
+	github.com/oekit/nns v0.6.0
+	github.com/oekit/registry v0.5.14
+	github.com/oekit/registry/nacos v0.1.13
 )
 
 require (
@@ -46,8 +46,8 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nacos-group/nacos-sdk-go/v2 v2.3.6-0.20260601044846-0e3d1d099507 // indirect
-	github.com/oekit/concurrency v0.32.0 // indirect
-	github.com/oekit/registry/nacosimpl v0.1.13 // indirect
+	github.com/oekit/concurrency v0.33.0 // indirect
+	github.com/oekit/registry/nacosimpl v0.1.14 // indirect
 	github.com/orcaman/concurrent-map v0.0.0-20210501183033-44dafcb38ecc // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
