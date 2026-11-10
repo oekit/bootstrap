@@ -21,9 +21,14 @@ import (
 //	app.GoBackground("poller", func(ctx context.Context) { ... })
 //	// shutdown 时自动按注册逆序关闭所有资源和等待后台任务退出
 type App struct {
-	mu          sync.Mutex
-	mgr         *lifecycle.Manager
-	closers     []namedCloser
+	mu      sync.Mutex
+	mgr     *lifecycle.Manager
+	closers []namedCloser
+	// preClose 是资源关闭之前的关闭钩子窗（#168）：flush/WAL 摘要/许可证
+	// 释放类钩子需要依赖资源（DB/连接）仍然在位，在 app-lifecycle:close 的
+	// closeAll 之前执行（drain 之后）——此前 WithShutdownHook 的钩子被静默
+	// 排到 app-lifecycle:wait 之后，依赖已关才跑，正是本类型文档点名的反模式。
+	preClose    []namedCloser
 	wg          sync.WaitGroup
 	cancel      context.CancelFunc
 	ctx         context.Context
@@ -100,7 +105,11 @@ func NewApp(mgr *lifecycle.Manager) *App {
 		return nil
 	}, 0)
 	mgr.Add("app-lifecycle:close", func(ctx context.Context) error {
-		return a.closeAll(ctx) // #80：错误进 shutdownErrs，经 Run 上抛
+		// #168：前置关闭钩子先于资源关闭执行（flush/WAL/许可证类钩子的
+		// 依赖资源此刻仍在位）；钩子错误与资源关闭错误同口径聚合上抛。
+		hookErr := a.runPreCloseHooks(ctx)
+		closeErr := a.closeAll(ctx) // #80：错误进 shutdownErrs，经 Run 上抛
+		return errors.Join(hookErr, closeErr)
 	}, 0)
 	// wait job 不设预算（timeout < 0，Manager 的「显式无超时」语义）：
 	// drain 时长只由 SetWaitTimeout 管辖（#134）——若用 Manager 默认预算
@@ -181,6 +190,51 @@ func (a *App) AddResourceTimeout(name string, timeout time.Duration, closer func
 			"resource", name)
 	}
 	a.closers = append(a.closers, namedCloser{name: name, closer: closer, timeout: timeout})
+}
+
+// AddPreCloseHook 注册「资源关闭之前」执行的关闭钩子（#168）。
+//
+// 执行窗口：app-lifecycle:close 阶段开始处——drain（进行中请求排空）之后、
+// closeAll（AddResource 资源逆序关闭）之前。面向 flush 指标/写 WAL 摘要/
+// 释放许可证这类「依赖资源必须仍在位」的收尾逻辑：它晚于普通 mgr.Add 注册的
+// job（那会排到 app-lifecycle:wait 之后、资源已关），早于资源关闭。
+//
+// 语义：按注册顺序执行；每个钩子 panic 隔离（转错误后继续后续钩子）；
+// 钩子错误与资源关闭错误同口径聚合进关停错误（#80 的上抛链路）。无独立
+// 超时预算，受 close 阶段预算（WithShutdownTimeout）约束——需要逐钩子
+// 预算时用 AddResourceTimeout 并自己编排。
+//
+// GoBackground 后台任务的排空在 wait 阶段（其后）——钩子执行时后台任务
+// 可能仍在收尾，钩子里访问「后台任务共写的共享状态」需自行同步。
+func (a *App) AddPreCloseHook(name string, hook func(ctx context.Context) error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.preClose = append(a.preClose, namedCloser{name: name, closer: hook, timeout: 0})
+}
+
+// runPreCloseHooks 按注册顺序执行前置关闭钩子，单钩子 panic 隔离，
+// 错误聚合返回（与 closeAll 同口径，进 shutdownErrs 经 Run 上抛）。
+// 收敛循环（#99 同款纪律）：钩子执行期间新注册的钩子在下一轮被补齐
+// 执行——「锁内取队首→解锁执行→再检查是否有新增」，直到取空。
+func (a *App) runPreCloseHooks(ctx context.Context) error {
+	var errs []error
+	for {
+		a.mu.Lock()
+		if len(a.preClose) == 0 {
+			a.mu.Unlock()
+			return errors.Join(errs...)
+		}
+		h := a.preClose[0] // FIFO：钩子按注册顺序执行
+		a.preClose = a.preClose[1:]
+		a.mu.Unlock()
+
+		if err := runCloserWithBudget(ctx, h); err != nil {
+			logger.Error("pre-close hook failed", "hook", h.name, "err", err)
+			errs = append(errs, fmt.Errorf("%s: %w", h.name, err))
+		} else {
+			logger.Info("pre-close hook done", "hook", h.name)
+		}
+	}
 }
 
 // GoBackground 启动一个带 panic recovery 的后台 goroutine。

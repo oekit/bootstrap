@@ -288,8 +288,9 @@ func TestShutdownHookComponent_CustomName(t *testing.T) {
 	}
 }
 
-// TestShutdownHookComponent_Init_RegistersHook verifies Init registers
-// the hook with the shutdown manager.
+// TestShutdownHookComponent_Init_RegistersHook verifies Init registers the
+// hook as a pre-close hook (default, #168): it fires during shutdown before
+// resource closers, not after the four app-lifecycle phases.
 func TestShutdownHookComponent_Init_RegistersHook(t *testing.T) {
 	called := atomic.Bool{}
 	c := &ShutdownHookComponent{
@@ -300,20 +301,38 @@ func TestShutdownHookComponent_Init_RegistersHook(t *testing.T) {
 		},
 	}
 	mgr := lifecycle.New(500 * time.Millisecond)
+	app := NewApp(mgr)
+	if err := c.Init(context.Background(), app, mgr); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	mgr.Shutdown(context.Background())
+	if !called.Load() {
+		t.Error("expected hook to be called on shutdown")
+	}
+}
+
+// TestShutdownHookComponent_Init_LateRegistersWithManager verifies Late=true
+// keeps the legacy placement: hook registered via mgr.Add, running after the
+// four app-lifecycle phases (resources already closed).
+func TestShutdownHookComponent_Init_LateRegistersWithManager(t *testing.T) {
+	called := atomic.Bool{}
+	c := &ShutdownHookComponent{
+		ComponentName: "late-hook",
+		Hook: func(_ context.Context) error {
+			called.Store(true)
+			return nil
+		},
+		Late: true,
+	}
+	mgr := lifecycle.New(500 * time.Millisecond)
+	// Late 路径不依赖 App（与旧形态一致，可传 nil）
 	if err := c.Init(context.Background(), nil, mgr); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	go mgr.Shutdown(context.Background())
-
-	// Wait for hook to fire.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if called.Load() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	mgr.Shutdown(context.Background())
+	if !called.Load() {
+		t.Error("expected late hook to be called on shutdown")
 	}
-	t.Error("expected hook to be called on shutdown")
 }
 
 // --- worker.go tests ---
