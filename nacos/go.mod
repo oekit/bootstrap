@@ -6,7 +6,7 @@ require (
 	github.com/oekit/bootstrap v0.7.2
 	github.com/oekit/core v0.13.6
 	github.com/oekit/logx v0.9.1
-	github.com/oekit/nns v0.5.15
+	github.com/oekit/nns v0.5.16
 	github.com/oekit/registry v0.5.12
 	github.com/oekit/registry/nacos v0.1.12
 )
