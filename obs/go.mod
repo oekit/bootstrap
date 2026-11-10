@@ -7,7 +7,7 @@ require (
 	github.com/oekit/core v0.13.6
 	github.com/oekit/logx v0.9.1
 	github.com/oekit/metrics v0.2.2
-	github.com/oekit/tracing v0.3.9
+	github.com/oekit/tracing v0.3.10
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 )
