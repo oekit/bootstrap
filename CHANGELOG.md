@@ -2,6 +2,18 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.23] — 2026-11-10
+
+- - build: 依赖地板对齐（floor sync，无代码变更）
+
+## [nacos/v0.3.21] — 2026-11-10
+
+- - build: 依赖地板对齐（floor sync，无代码变更）
+
+## [v0.7.3] — 2026-11-10
+
+- - build: 依赖地板对齐（floor sync，无代码变更）
+
 ## [v0.7.2] — 2026-11-10
 
 - - build: 依赖地板对齐（floor sync，无代码变更）
