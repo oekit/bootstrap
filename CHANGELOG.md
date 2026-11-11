@@ -2,6 +2,24 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.25] — 2026-11-12
+
+- 全仓 issue 清零（#177-#183）：drainClosers 收敛 closer 执行引擎（#177）、runCloserWithBudget 与 core/lifecycle 对齐性钉住（#178）、waitWithTimeout 单源「wg.Wait 带超时放弃」（#179）、nacos Init 拆函数拆文件（#180）、mergeTeardownErrs 收敛关停错误并入（#181）、panic→error 四出口收编 pkg/errors.Recovered（#182）、WorkerManager.Wait 并发注册竞态修复（#183）；Go 地板 1.26.0 + pkg v0.45.0/logx v0.10.0/metrics v0.3.0 地板对齐
+
+关联问题单：bootstrap#177、bootstrap#178、bootstrap#179、bootstrap#180、bootstrap#181、bootstrap#182、bootstrap#183。
+
+## [nacos/v0.3.23] — 2026-11-12
+
+- 全仓 issue 清零（#177-#183）：drainClosers 收敛 closer 执行引擎（#177）、runCloserWithBudget 与 core/lifecycle 对齐性钉住（#178）、waitWithTimeout 单源「wg.Wait 带超时放弃」（#179）、nacos Init 拆函数拆文件（#180）、mergeTeardownErrs 收敛关停错误并入（#181）、panic→error 四出口收编 pkg/errors.Recovered（#182）、WorkerManager.Wait 并发注册竞态修复（#183）；Go 地板 1.26.0 + pkg v0.45.0/logx v0.10.0/metrics v0.3.0 地板对齐
+
+关联问题单：bootstrap#177、bootstrap#178、bootstrap#179、bootstrap#180、bootstrap#181、bootstrap#182、bootstrap#183。
+
+## [v0.7.7] — 2026-11-12
+
+- 全仓 issue 清零（#177-#183）：drainClosers 收敛 closer 执行引擎（#177）、runCloserWithBudget 与 core/lifecycle 对齐性钉住（#178）、waitWithTimeout 单源「wg.Wait 带超时放弃」（#179）、nacos Init 拆函数拆文件（#180）、mergeTeardownErrs 收敛关停错误并入（#181）、panic→error 四出口收编 pkg/errors.Recovered（#182）、WorkerManager.Wait 并发注册竞态修复（#183）；Go 地板 1.26.0 + pkg v0.45.0/logx v0.10.0/metrics v0.3.0 地板对齐
+
+关联问题单：bootstrap#177、bootstrap#178、bootstrap#179、bootstrap#180、bootstrap#181、bootstrap#182、bootstrap#183。
+
 ## [v0.7.6] — 2026-11-11
 
 - - fix: WithShutdownHook 关闭钩子改为前置窗口——drain 之后、AddResource 资源关闭之前执行（flush/WAL 摘要/许可证类钩子的依赖资源仍在位），不再静默排到 app-lifecycle:wait 之后；ShutdownHookComponent 新增 Late 字段显式选择旧晚窗位置（#168）
