@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/oekit/bootstrap v0.7.6
-	github.com/oekit/core v0.14.1
+	github.com/oekit/core v0.14.2
 	github.com/oekit/logx v0.9.2
 	github.com/oekit/metrics v0.2.4
 	github.com/oekit/tracing v0.4.0

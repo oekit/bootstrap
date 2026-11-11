@@ -8,4 +8,4 @@ require (
 	github.com/oekit/logx v0.9.2
 )
 
-require github.com/oekit/core v0.14.1
+require github.com/oekit/core v0.14.2
