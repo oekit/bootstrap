@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	pkgerrors "github.com/oekit/pkg/errors"
 )
 
 func reset() {
@@ -333,5 +335,30 @@ func TestDegradedError_UnwrapChain(t *testing.T) {
 	}
 	if got := Degraded(nil).Error(); got != "degraded" {
 		t.Errorf("Degraded(nil).Error() = %q, want %q", got, "degraded")
+	}
+}
+
+// TestSafeRun_PanicErrorIdentity 回归 #182：check 以 panic(err) 失败时，
+// 错误身份经 pkg/errors.Recovered 收编后不丢——errors.Is/As 可穿透
+// PanicError 直达原始错误（旧实现 fmt.Errorf("check panic: %v", r) 把身份
+// 拍平成纯文本）；栈与类型信息在场。
+func TestSafeRun_PanicErrorIdentity(t *testing.T) {
+	sentinel := errors.New("check sentinel boom")
+
+	err := safeRun(context.Background(), func(context.Context) error {
+		panic(sentinel)
+	})
+	if err == nil {
+		t.Fatal("check panic 必须转为错误")
+	}
+	var perr *pkgerrors.PanicError
+	if !errors.As(err, &perr) {
+		t.Fatalf("应为 *pkgerrors.PanicError（#182 单源）, got %T: %v", err, err)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("panic(error) 的错误身份丢失（#182）, got %v", err)
+	}
+	if len(perr.Stack) == 0 {
+		t.Fatal("PanicError 应携带 panic 现场栈")
 	}
 }

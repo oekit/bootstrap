@@ -10,6 +10,7 @@ import (
 
 	"github.com/oekit/concurrency/async"
 	"github.com/oekit/core/lifecycle"
+	pkgerrors "github.com/oekit/pkg/errors"
 )
 
 // App 是应用生命周期管理器，统一管理资源注册、后台任务和优雅关闭。
@@ -216,23 +217,57 @@ func (a *App) AddPreCloseHook(name string, hook func(ctx context.Context) error)
 // 错误聚合返回（与 closeAll 同口径，进 shutdownErrs 经 Run 上抛）。
 // 收敛循环（#99 同款纪律）：钩子执行期间新注册的钩子在下一轮被补齐
 // 执行——「锁内取队首→解锁执行→再检查是否有新增」，直到取空。
+// 执行引擎与 closeAll 单源于 drainClosers（#177）：本函数只提供 FIFO 取向
+// （takePreClose）与钩子口径的日志文案。
 func (a *App) runPreCloseHooks(ctx context.Context) error {
+	return drainClosers(ctx, a.takePreClose, "hook", "pre-close hook failed", "pre-close hook done")
+}
+
+// takePreClose 锁内取队首前置钩子（FIFO：按注册顺序执行），取空返回 false。
+// 「锁内取、锁外执行」纪律（#102）由调用方 drainClosers 保证。
+func (a *App) takePreClose() (namedCloser, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.preClose) == 0 {
+		return namedCloser{}, false
+	}
+	h := a.preClose[0]
+	a.preClose = a.preClose[1:]
+	return h, true
+}
+
+// takeCloser 锁内取队尾资源 closer（LIFO：注册逆序执行）；取空时置
+// closeDone（#99：此后 AddResource 的 closer 永远不会执行）并返回 false。
+func (a *App) takeCloser() (namedCloser, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.closers) == 0 {
+		a.closeDone = true
+		return namedCloser{}, false
+	}
+	c := a.closers[len(a.closers)-1]
+	a.closers = a.closers[:len(a.closers)-1]
+	return c, true
+}
+
+// drainClosers 收敛循环执行 closer 的单源引擎（#177）：runPreCloseHooks（FIFO）
+// 与 closeAll（LIFO）此前各写一份「锁内取队首/队尾→解锁执行→失败 ERROR 留痕
+// 并聚合、成功 Info」骨架，仅取向与日志文案不同。take 在锁内取下一个待执行
+// closer（false = 队列取空，收敛返回——#99 收敛语义与 take 实现方的置位职责
+// 由其文档约定）；错误统一 fmt.Errorf("%s: %w", name) 聚合（errors.Join 返回，
+// 经 #80 链路上抛），失败/成功日志口径（failMsg/okMsg/kindKey）由调用方给定。
+func drainClosers(ctx context.Context, take func() (namedCloser, bool), kindKey, failMsg, okMsg string) error {
 	var errs []error
 	for {
-		a.mu.Lock()
-		if len(a.preClose) == 0 {
-			a.mu.Unlock()
+		c, ok := take()
+		if !ok {
 			return errors.Join(errs...)
 		}
-		h := a.preClose[0] // FIFO：钩子按注册顺序执行
-		a.preClose = a.preClose[1:]
-		a.mu.Unlock()
-
-		if err := runCloserWithBudget(ctx, h); err != nil {
-			logger.Error("pre-close hook failed", "hook", h.name, "err", err)
-			errs = append(errs, fmt.Errorf("%s: %w", h.name, err))
+		if err := runCloserWithBudget(ctx, c); err != nil {
+			logger.Error(failMsg, kindKey, c.name, "err", err)
+			errs = append(errs, fmt.Errorf("%s: %w", c.name, err))
 		} else {
-			logger.Info("pre-close hook done", "hook", h.name)
+			logger.Info(okMsg, kindKey, c.name)
 		}
 	}
 }
@@ -330,42 +365,23 @@ func (a *App) SetWaitTimeout(d time.Duration) {
 }
 
 // timedWait 等待所有 GoBackground goroutine 退出，超时或 context 取消则跳过并警告。
-//
-// 超时触发后，内部 wg.Wait goroutine 被有意泄漏（sync.WaitGroup 无法取消等待），
-// 进程退出时自动回收。这是可接受的，因为仍在运行的 goroutine 本身就是拒绝退出的。
+// 「wg.Wait 带超时放弃」的实现单源于 waitWithTimeout（#179）；「0 = 无限等待
+// 但仍监听 Shutdown ctx 取消」与「超时放弃」两分支的日志口径保留在本方法
+// （与 WorkerManager.CloseTimeout 的 ERROR 口径各自独立）。
 func (a *App) timedWait(ctx context.Context) {
 	a.mu.Lock()
 	timeout := a.waitTimeout
 	a.mu.Unlock()
 
-	done := make(chan struct{})
-	async.GoSafe(func() {
-		a.wg.Wait()
-		close(done)
-	})
-
-	if timeout <= 0 {
-		// 无限等待（SetWaitTimeout(0)，#134）：wait job 无预算，本 ctx 只会
-		// 因调用方显式取消 Shutdown 的 ctx 而 Done（Bootstrapper.Run 传
-		// Background，永不取消）——此时按「显式放弃等待」处理。
-		select {
-		case <-done:
-		case <-ctx.Done():
-			logger.Warn("shutdown context cancelled, skipping goroutine drain",
-				"err", ctx.Err())
-		}
-		return
-	}
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	select {
-	case <-done:
-	case <-timer.C:
+	switch waitWithTimeout(&a.wg, ctx.Done(), timeout) {
+	case waitDrained:
+	case waitTimedOut:
 		logger.Warn("GoBackground goroutine drain timeout, proceeding with shutdown",
 			"timeout", timeout.String())
-	case <-ctx.Done():
+	case waitAborted:
+		// 无限等待（SetWaitTimeout(0)，#134）或超时窗口内被显式中止：本 ctx
+		// 只会因调用方显式取消 Shutdown 的 ctx 而 Done（Bootstrapper.Run 传
+		// Background，永不取消）——按「显式放弃等待」处理。
 		logger.Warn("shutdown context cancelled, skipping goroutine drain",
 			"err", ctx.Err())
 	}
@@ -386,31 +402,24 @@ func (a *App) timedWait(ctx context.Context) {
 // 关停竞态窗口完成 nnsc.Register 后才 AddResource）也会被执行，不再产生
 // 「已注册但永不反注册」的注册中心幽灵实例（此前只能靠 nacos ephemeral
 // 心跳超时兜底，数十秒窗口内流量打向已停止的 server）。
+// 执行引擎与 runPreCloseHooks 单源于 drainClosers（#177）：本函数只提供
+// LIFO 取向（takeCloser，含取空置 closeDone 的 #99 置位职责）与资源口径
+// 的日志文案。
 func (a *App) closeAll(ctx context.Context) error {
-	var errs []error
-	for {
-		a.mu.Lock()
-		if len(a.closers) == 0 {
-			a.closeDone = true
-			a.mu.Unlock()
-			return errors.Join(errs...)
-		}
-		// 取队尾（注册逆序）后立即放锁，执行段不持锁（#102）。
-		c := a.closers[len(a.closers)-1]
-		a.closers = a.closers[:len(a.closers)-1]
-		a.mu.Unlock()
-
-		if err := runCloserWithBudget(ctx, c); err != nil {
-			logger.Error("close resource failed", "resource", c.name, "err", err)
-			errs = append(errs, fmt.Errorf("%s: %w", c.name, err))
-		} else {
-			logger.Info("resource closed", "resource", c.name)
-		}
-	}
+	return drainClosers(ctx, a.takeCloser, "resource", "close resource failed", "resource closed")
 }
 
 // runCloserWithBudget 执行单个 closer：独立超时预算 + panic 隔离 + 预算
 // 切片（#75）。语义对齐 core/lifecycle.Manager.runCloser 的隔离粒度。
+//
+// 与 core/lifecycle.Manager.runCloser 的关系（#178）：后者是本执行器的规范
+// 原型（同为「timeout>0 时从 Background 派生独立预算 + defer recover 转
+// err」），差异仅 Manager 多带父 ctx 的 AfterFunc 取消传播——而 App 的预算化
+// closer 恰恰**要求**不挂 parent 取消（#135）。Manager 的 runCloser 未导出，
+// 且 App 受注册逆序（LIFO）约束无法直接委托 mgr.Add 执行——治本方案
+// （Manager.Add 增加逆序/分组执行选项）属 core 仓射程；本仓保留此私有单源，
+// 对齐性由 TestRunCloserWithBudget_AlignsManagerSemantics 钉住（panic 身份、
+// 预算自持、透传三分支）。
 //
 // timeout <= 0 时不设独立预算，直接透传 close 阶段的 ctx（受 close job
 // 预算约束）。timeout > 0 时预算完全自持（#135）：仅从 Background 派生，
@@ -423,11 +432,13 @@ func (a *App) closeAll(ctx context.Context) error {
 // panic 隔离（#132，对齐 Manager 的 per-closer recover）：某资源 Close 在
 // 停机竞态下 panic 时转为错误（closeAll 会再包上资源名）并继续逆序链上
 // 的后续 closer——panic 冲出循环会让其后全部反注册/flush 被跳过，留下
-// closeAll 要消灭的注册中心幽灵实例。
+// closeAll 要消灭的注册中心幽灵实例。panic 值经 pkg/errors.Recovered 收编
+// （#182 单源）：panic(err) 的 error 身份不丢（errors.Is/As 可穿透），
+// 栈与类型信息在场。
 func runCloserWithBudget(parent context.Context, c namedCloser) (err error) {
 	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panicked: %v", r)
+		if perr := pkgerrors.Recovered(recover()); perr != nil {
+			err = perr
 		}
 	}()
 	if c.timeout <= 0 {

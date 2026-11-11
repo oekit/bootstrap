@@ -140,28 +140,13 @@ func (w *WorkerManager) Close() {
 // CloseTimeout 是带超时的 Close（#98）：最多等待 d，超时后放弃等待仍在
 // 运行的任务、打 ERROR 日志留痕并返回——停机序列不再被不感知 ctx 的 fn
 // 无限期挂死（调用方此前没有任何超时兜底可加，wg.Wait 裸暴露）。
-// 被放弃的任务随进程退出回收；内部 wg.Wait 的 goroutine 有意泄漏
-// （sync.WaitGroup 的等待无法取消），与 App.timedWait 同一权衡。
+// 被放弃的任务随进程退出回收；「wg.Wait 带超时放弃」的实现与权衡注释
+// 单源于 waitWithTimeout（#179，与 App.timedWait 共用）。
 // d <= 0 等同 Close（无限等待）。多次调用是安全的（与 Close 混用亦然）。
 func (w *WorkerManager) CloseTimeout(d time.Duration) {
 	w.markClosed()
 	w.cancel()
-	if d <= 0 {
-		w.wg.Wait()
-		return
-	}
-
-	done := make(chan struct{})
-	async.GoSafe(func() {
-		w.wg.Wait()
-		close(done)
-	})
-
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-done:
-	case <-timer.C:
+	if waitWithTimeout(&w.wg, nil, d) == waitTimedOut {
 		logger.Error("worker manager close timeout, abandoning still-running tasks",
 			"timeout", d.String())
 	}
@@ -174,7 +159,17 @@ func (w *WorkerManager) markClosed() {
 	w.mu.Unlock()
 }
 
-// Wait 等待所有任务退出。
+// Wait 等待所有任务退出（#183）。
+//
+// 并发纪律：Wait 先关闭注册闸（markClosed）再等存量任务跑完——语义 =
+// 拒绝新注册并等存量。此前裸 wg.Wait() 不关闸：另一 goroutine 并发
+// AddTicker/AddOnce 时，「计数为 0 且 Wait 进行中发起正 delta Add」属于
+// sync.WaitGroup 规则的未定义行为（runtime 以「sync: WaitGroup misuse:
+// Add called concurrently with Wait」panic 拒绝）——App 侧 #104 修过同款
+// 问题，本方法是被 #183 点名的漏网旁路。「Wait 期间继续注册」的形态
+// 与 WaitGroup 铁律（Wait 后不得再 Add）冲突，不提供；需要「取消任务 +
+// 等待」的完整关停用 Close/CloseTimeout。多次调用安全。
 func (w *WorkerManager) Wait() {
+	w.markClosed()
 	w.wg.Wait()
 }

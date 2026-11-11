@@ -12,6 +12,7 @@ import (
 	"github.com/oekit/concurrency/async"
 	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/logx"
+	pkgerrors "github.com/oekit/pkg/errors"
 )
 
 var logger = logx.Delegating("bootstrap")
@@ -205,12 +206,14 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	// 3. 启动用户服务
 	// panic 转为 error 发入 errCh：async.GoSafe 的 recover 在外层，
 	// 若不在此处转换，panic 会被静默吞掉且 select 永远等不到 errCh，
-	// 进程无服务地挂起（假活）。
+	// 进程无服务地挂起（假活）。panic 值经 pkg/errors.Recovered 收编
+	// （#182 单源）：userFn 以 panic(err) 失败时错误身份不丢
+	// （errors.Is/As 可穿透 PanicError），栈与类型信息在场。
 	errCh := make(chan error, 1)
 	async.GoSafe(func() {
 		defer func() {
-			if r := recover(); r != nil {
-				errCh <- fmt.Errorf("bootstrap: userFn panicked: %v", r)
+			if perr := pkgerrors.Recovered(recover()); perr != nil {
+				errCh <- fmt.Errorf("bootstrap: userFn: %w", perr)
 			}
 		}()
 		errCh <- userFn(app)
@@ -287,15 +290,27 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	// 时退出码必须反映关停质量，此前 runErr 只承载 userFn 错误，「带着未落盘
 	// 数据退出、退出码 0」在滚动发版门禁 / K8s preStop 对账的部署链路上
 	// 不可见。runErr 优先（业务错误是主因），关停错误以 join 附加。
-	if shutdownErrs := mgr.Errors(); len(shutdownErrs) > 0 {
-		logger.Error("shutdown errors during resource teardown", "count", len(shutdownErrs), "errs", shutdownErrs)
-		joined := errors.Join(shutdownErrs...)
-		if runErr != nil {
-			return fmt.Errorf("%w; shutdown: %w", runErr, joined)
-		}
-		return joined
+	// 模板与 rollback 单源于 mergeTeardownErrs（#181）。
+	return mergeTeardownErrs(mgr, runErr, "shutdown")
+}
+
+// mergeTeardownErrs 把关停/回滚期 teardown 错误并入主因返回值（#181 单源）：
+// Run 尾部（label=shutdown，#80）与 rollback（label=rollback，#169）此前各写
+// 一份「mgr.Errors() 非空 → logger.Error 计数留痕 → cause 优先、errors.Join
+// 以 "; <label>: " 附加」模板。cause 是主因（业务/启动错误，可为 nil）；
+// teardown 错误 errors.Join 后附加，保持 errors.Is 可分流；无 teardown 错误
+// 时原样返回 cause。#80/#169 的两处口径（runErr 优先、Join 保 Is）从此单源。
+func mergeTeardownErrs(mgr *lifecycle.Manager, cause error, label string) error {
+	teardownErrs := mgr.Errors()
+	if len(teardownErrs) == 0 {
+		return cause
 	}
-	return runErr
+	logger.Error(label+" errors during resource teardown", "count", len(teardownErrs), "errs", teardownErrs)
+	joined := errors.Join(teardownErrs...)
+	if cause != nil {
+		return fmt.Errorf("%w; %s: %w", cause, label, joined)
+	}
+	return joined
 }
 
 // rollback 执行启动失败回滚并把回滚期关停错误并入返回值（#169）。
@@ -305,21 +320,21 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 // 多组件启动失败的根因与回滚失败互相掩盖，回滚泄漏（fd/goroutine/注册
 // 残留）对部署门禁不可见。cause 是主因（init/beforeServe 错误），
 // 回滚期关停错误以「; rollback: 」附加，errors.Join 保持可 errors.Is 分流。
+// 合并模板与 Run 尾部单源于 mergeTeardownErrs（#181）。
 func (b *Bootstrapper) rollback(mgr *lifecycle.Manager, cause error) error {
 	mgr.Shutdown(context.Background())
-	if rollbackErrs := mgr.Errors(); len(rollbackErrs) > 0 {
-		logger.Error("rollback errors during resource teardown", "count", len(rollbackErrs), "errs", rollbackErrs)
-		return fmt.Errorf("%w; rollback: %w", cause, errors.Join(rollbackErrs...))
-	}
-	return cause
+	return mergeTeardownErrs(mgr, cause, "rollback")
 }
 
 // safeInit 执行组件 Init 并隔离 panic：组件初始化 panic 转为 error，
 // 保证失败回滚路径得以执行（panic 会直接跳出 Run 的初始化循环）。
+// panic 值经 pkg/errors.Recovered 收编（#182 单源）：组件以 panic(err)
+// 失败时错误身份不丢；上下文（组件名、init 阶段）由 rollback 的
+// 「component %s init failed」包装提供，此处不再叠加前缀。
 func safeInit(c Component, ctx context.Context, app *App, mgr *lifecycle.Manager) (err error) {
 	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("component init panicked: %v", r)
+		if perr := pkgerrors.Recovered(recover()); perr != nil {
+			err = perr
 		}
 	}()
 	return c.Init(ctx, app, mgr)
