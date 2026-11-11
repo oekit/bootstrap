@@ -90,18 +90,20 @@ func TestApp_CloserPanic_IsolatedAndChainContinues(t *testing.T) {
 	if !afterPanicRan.Load() || !lastRan.Load() {
 		t.Fatal("closer panic 中断了逆序停机链，其后的 closer 被跳过（#132）")
 	}
-	// panic 转错误经 #80 链路上抛（退出码可感知），且带资源名
+	// panic 转错误经 #80 链路上抛（退出码可感知），且带资源名。
+	// #182：panic 值经 pkg/errors.Recovered 收编，文案为
+	// "panic: <类型>: <值>"（资源名由 closeAll 的 "%s: %w" 包装携带）。
 	errs := mgr.Errors()
 	if len(errs) == 0 {
 		t.Fatal("closer panic 应转为关闭错误并上抛（#132）")
 	}
 	joined := false
 	for _, err := range errs {
-		if strings.Contains(err.Error(), "panics") && strings.Contains(err.Error(), "panicked") {
+		if strings.Contains(err.Error(), "panics") && strings.Contains(err.Error(), "panic:") {
 			joined = true
 		}
 	}
 	if !joined {
-		t.Fatalf("panic 错误应带资源名与 panicked 标记, got %v", errs)
+		t.Fatalf("panic 错误应带资源名与 panic 标记, got %v", errs)
 	}
 }

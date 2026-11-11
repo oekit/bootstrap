@@ -68,6 +68,7 @@ import (
 	"time"
 
 	"github.com/oekit/concurrency/async"
+	pkgerrors "github.com/oekit/pkg/errors"
 )
 
 // Check 是单个健康检查项。返回 nil 表示通过;返回普通 error 表示硬失败
@@ -329,11 +330,14 @@ func failureText(err error, runCtx context.Context, timeout time.Duration) strin
 	return err.Error()
 }
 
-// safeRun 调 check 捕获 panic(健康检查不应让中间件崩溃)。
+// safeRun 调 check 捕获 panic(健康检查不应让中间件崩溃)。panic 值经
+// pkg/errors.Recovered 收编（#182 单源）：check 以 panic(err) 失败时错误
+// 身份不丢（errors.Is/As 可穿透），栈与类型信息在场；文案由 PanicError 的
+// "panic: <类型>: <值>" 提供（Result.Checks 记入该文本）。
 func safeRun(ctx context.Context, check Check) (err error) {
 	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("check panic: %v", r)
+		if perr := pkgerrors.Recovered(recover()); perr != nil {
+			err = perr
 		}
 	}()
 	return check(ctx)
