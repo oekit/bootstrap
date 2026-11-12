@@ -159,7 +159,7 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 		if c.Required {
 			return fmt.Errorf("nns init (required): %w", err)
 		}
-		logger.Warn("NNS init failed, continuing without NNS", "err", err)
+		logger.Warn("NNS init failed, continuing without NNS", logx.ErrKey, err)
 		c.setRegisterState(&RegisterState{
 			Phase:   PhaseFailed,
 			Service: c.NacosCfg.ServiceName,
@@ -178,11 +178,22 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 			Port:    c.Port,
 			Since:   time.Now(),
 		})
-		app.GoBackground("nns-register", func(ctx context.Context) {
+		if err := app.GoBackground("nns-register", func(ctx context.Context) {
 			if c.registerWhenReady(ctx, app) {
 				c.registerAndWire(ctx, app, nnsc)
 			}
-		})
+		}); err != nil {
+			// #186：组件 Init 撞上关停竞态窗口（app-lifecycle:cancel 已执行）
+			// 时注册被拒——延迟注册永不发生。Required 强依赖按 fail-fast
+			// 上抛（注册缺失=对集群不可用，与 Init 失败同罪）；软依赖告警
+			// 续跑（对齐 Init 失败的处置口径）。
+			if c.Required {
+				return fmt.Errorf("nns: defer registration on required component %s: %w",
+					c.NacosCfg.ServiceName, err)
+			}
+			logger.Warn("nns deferred registration dropped: app shutting down",
+				"service", c.NacosCfg.ServiceName, logx.ErrKey, err)
+		}
 	} else {
 		c.setRegisterState(&RegisterState{
 			Phase:   PhaseSkipped,
@@ -269,7 +280,15 @@ func WithReadyTimeout(d time.Duration) bootstrap.BootstrapperOption {
 //     （正是「静默永不注册」的高危形态，见 #74 的下游活案例）。
 //
 // 不适合：本地开发（Nacos 常不可达）、注册为纯软增强的服务（有其他发现路径）。
-// 用法同 WithReadyTimeout：须在 WithNNS/WithRequiredNNS 之前应用。
+//
+// ⚠️ 作用域同 WithReadyTimeout（#76，进程级全局）：写入包级 atomic，顺序无关、
+// 后写覆盖先写——消费点在注册 goroutine 运行期（组件字段与全局缺省取或，
+// 组件字段优先），选项应用全在 bootstrap.New 阶段、消费在 Run 之后，与
+// WithNNS/WithRequiredNNS 的书写顺序无关。文档曾宣称「须在 WithNNS 之前
+// 应用」——与实现不符，已按真实行为修正（本条注释即权威，同
+// WithReadyTimeout 的纠错）。多 Bootstrapper 场景（测试/宿主进程）会互相
+// 覆盖：需要 per-Bootstrapper 作用域时改用组件字段 NNSComponent.ReadyFatal
+// （显式构造组件 + Bootstrapper.AddComponent）。
 func WithReadyFatal() bootstrap.BootstrapperOption {
 	return func(b *bootstrap.Bootstrapper) {
 		readyFatal.Store(true)

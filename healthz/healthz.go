@@ -171,8 +171,12 @@ func MarkClosed() {
 	global.closed.Store(true)
 }
 
-// ResetForTest 清空 registry + 重置 closed 标志(仅供 test 使用)。
-func ResetForTest() {
+// resetForTest 清空 registry + 重置 closed 标志——仅供本包测试使用的未导出
+// helper（#187）：测试专用 API 不进生产导出面。此前以导出名 ResetForTest
+// 暴露，任何业务代码都能调它把全应用 registry（含 MarkClosed 状态）清空，
+// 且 global 是包级 singleton，误用影响是全局的；本包测试同包可见，直接调用
+// 未导出名即可，跨包 e2e 测试应自建 registry 状态而非重置生产 singleton。
+func resetForTest() {
 	global.mu.Lock()
 	defer global.mu.Unlock()
 	global.checks = map[string]checkEntry{}
