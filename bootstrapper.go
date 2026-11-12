@@ -60,8 +60,20 @@ func WithServiceName(name string) BootstrapperOption {
 }
 
 // WithShutdownTimeout 设置优雅关闭超时，默认 10 秒。
+//
+// 零值语义（#206，与 nacos.WithReadyTimeout(0) 同口径）：**0 = 未配置**，
+// 回填默认 10s——配置结构体零值透传（WithShutdownTimeout(cfg.ShutdownTimeout)
+// 在配置未填时）不再把「没配置超时」静默变成「关停永不超时」：closer 挂死时
+// Run 永不返回，只能靠 systemd/K8s kill -9 兜底且全程无日志点明。
+// **负值 = 关闭关停超时**（closer 不设兜底预算，仅在确信所有 closer 都会
+// 自行返回时使用）。
 func WithShutdownTimeout(d time.Duration) BootstrapperOption {
-	return func(b *Bootstrapper) { b.shutdownTimeout = d }
+	return func(b *Bootstrapper) {
+		if d == 0 {
+			d = defaultShutdownTimeout // 0 = 未配置 → 回填默认（#206）
+		}
+		b.shutdownTimeout = d
+	}
 }
 
 // WithComponent 添加自定义组件——第三方集成注入的标准入口。
@@ -131,10 +143,14 @@ type ServiceNameAware interface {
 	SetServiceName(name string)
 }
 
+// defaultShutdownTimeout 是优雅关停的默认预算（#206：WithShutdownTimeout(0)
+// 零值归一的回填目标，与 New 缺省同一常量，两处不再各写一个 10s）。
+const defaultShutdownTimeout = 10 * time.Second
+
 // New 创建 Bootstrapper 实例。
 func New(opts ...BootstrapperOption) (*Bootstrapper, error) {
 	b := &Bootstrapper{
-		shutdownTimeout: 10 * time.Second,
+		shutdownTimeout: defaultShutdownTimeout,
 	}
 	for _, opt := range opts {
 		opt(b)
@@ -191,14 +207,21 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	// 2. 初始化组件：任一失败时回滚已初始化组件（执行已注册的关闭钩子），
 	//    否则 tracing exporter 等资源会泄漏到进程结束
 	for _, c := range b.components {
+		// 组件名先取（#201）：c.Name() 移进 panic 隔离面——nil 组件的裸
+		// Name() 调用若发生在错误格式化时，已被 safeInit recover 的 init
+		// 错误会二次爆炸并冲出 Run（跳过 rollback）。
+		name := componentName(c)
 		if err := safeInit(c, ctx, app, mgr); err != nil {
-			return b.rollback(mgr, fmt.Errorf("bootstrap: component %s init failed: %w", c.Name(), err))
+			return b.rollback(mgr, fmt.Errorf("bootstrap: component %s init failed: %w", name, err))
 		}
 	}
 
-	// 2.5 BeforeServe 钩子：引擎启动前的定制准备（listener 收养/pid 交接等）
+	// 2.5 BeforeServe 钩子：引擎启动前的定制准备（listener 收养/pid 交接等）。
+	// panic 经 safeBeforeServe 转 error 走同一回滚分支（#201）：此前裸调用
+	// 让 panic 直接冲出 Run ⇒ rollback 不执行，已初始化组件的关闭链
+	// （tracing exporter flush、nacos 断连、AddResource closer）被整体跳过。
 	for i, fn := range b.beforeServe {
-		if err := fn(); err != nil {
+		if err := safeBeforeServe(fn); err != nil {
 			return b.rollback(mgr, fmt.Errorf("bootstrap: beforeServe[%d] failed: %w", i, err))
 		}
 	}
@@ -338,4 +361,36 @@ func safeInit(c Component, ctx context.Context, app *App, mgr *lifecycle.Manager
 		}
 	}()
 	return c.Init(ctx, app, mgr)
+}
+
+// safeBeforeServe 执行 BeforeServe 钩子并隔离 panic（#201）：钩子 panic 转为
+// error 走既有的「beforeServe[%d] failed」回滚分支——与 safeInit 同款隔离
+// 粒度、同一 #182 panic→error 单源出口（pkg/errors.Recovered 收编，panic(err)
+// 的错误身份不丢，errors.Is/As 可穿透）。此前该循环是裸调用：panic 直接冲出
+// Run，rollback 不执行且调用方拿不到 bootstrap: 前缀错误——与 safeInit
+// godoc 自己声明的「保证失败回滚路径得以执行」纪律相矛盾。
+func safeBeforeServe(fn func() error) (err error) {
+	defer func() {
+		if perr := pkgerrors.Recovered(recover()); perr != nil {
+			err = perr
+		}
+	}()
+	return fn()
+}
+
+// componentName 返回组件名，隔离 Name() 的 panic（#201，#182 出口清单成员）：
+// nil 组件（WithComponent(nil)）的 Name() 是裸 nil 接口调用——若在 safeInit
+// 之后的错误格式化里才炸，已被 recover 的 init 错误会二次爆炸并跳过 rollback。
+// 捕获先于 Init、与 safeInit 同一调用点：任何形态（nil 接口 / Name() 自身
+// panic）都拿到 "<nil>" 占位名而不是让 Run 冲出；错误文案形态不变。
+func componentName(c Component) (name string) {
+	defer func() {
+		if recover() != nil {
+			name = "<nil>"
+		}
+	}()
+	if c == nil {
+		return "<nil>"
+	}
+	return c.Name()
 }

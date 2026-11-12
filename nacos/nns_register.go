@@ -44,7 +44,12 @@ func (c *NNSComponent) registerWhenReady(ctx context.Context, app *bootstrap.App
 	if timeout == 0 {
 		timeout = time.Duration(readyTimeoutNanos.Load())
 	}
-	fatal := c.ReadyFatal || readyFatal.Load() // 组件字段优先级高于全局缺省（#74）
+	// 取或：裸 ReadyFatal 只有抬升权（#74）；显式覆盖走三态字段（#202）——
+	// *false 在全局已置位时按组件粒度关掉 fail-fast（逃生舱）。
+	fatal := c.ReadyFatal || readyFatal.Load()
+	if c.ReadyFatalOverride != nil {
+		fatal = *c.ReadyFatalOverride
+	}
 	var timer *time.Timer
 	var timeoutCh <-chan time.Time
 	if timeout > 0 {
