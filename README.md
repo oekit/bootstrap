@@ -89,7 +89,7 @@ h.Spin()
 | 阶段 | 做什么 |
 |---|---|
 | `cancel` | 取消 `app.Context()`，通知 GoBackground 退出 |
-| `drain` | 等待 `Acquire` 中的在途请求（`shutdown.Manager.Drain`） |
+| `drain` | 等待 `Acquire` 中的在途请求（`lifecycle.Manager.Drain`） |
 | `close` | 逆序执行 `app.AddResource` 注册的 closer |
 | `wait` | 等待 `app.GoBackground` goroutine 退出（超时可配） |
 

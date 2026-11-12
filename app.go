@@ -10,6 +10,7 @@ import (
 
 	"github.com/oekit/concurrency/async"
 	"github.com/oekit/core/lifecycle"
+	"github.com/oekit/logx"
 	pkgerrors "github.com/oekit/pkg/errors"
 )
 
@@ -44,6 +45,13 @@ type App struct {
 	// closeDone 在 closeAll 收敛（无剩余 closer 且不再有新增）后置位（#99）：
 	// 此后 AddResource 的 closer 永远不会被调用，注册时打 ERROR 留痕。
 	closeDone bool
+	// preCloseDone 在前置钩子队列收敛（takePreClose 取空）后置位（#186）：
+	// 此后 AddPreCloseHook 的钩子永远不会被执行（runPreCloseHooks 已返回，
+	// 不再有收敛轮次），注册时打 ERROR 留痕——与 closeDone 的 #99 语义对偶。
+	// 置位点与边界严格对齐：钩子队列在 close 阶段先于 closeAll 排空，收敛
+	// （取空返回）前注册的钩子仍会被下一轮 take 补齐执行（drainClosers 的
+	// 收敛语义），收敛后注册的才注定不执行。
+	preCloseDone bool
 
 	readyOnce sync.Once
 	ready     chan struct{} // NewApp 初始化；Ready 时 close 广播
@@ -65,6 +73,23 @@ type namedCloser struct {
 
 // defaultWaitTimeout is the default drain timeout for GoBackground goroutines.
 const defaultWaitTimeout = 30 * time.Second
+
+// ErrAppClosed 在 App 关停序列启动（app-lifecycle:cancel 阶段置 closing，
+// #104）之后调用 GoBackground 时返回（#186）：注册被显式拒绝、fn 不执行。
+//
+// 关停期注册的统一纪律（#186，三类 API 一套口径——此前 GoBackground 拒绝
+// 无返回值、AddPreCloseHook 完全静默、AddResourceTimeout 打 ERROR，三套
+// 纪律互相不一致）：
+//
+//   - 「注册即被拒」面（动作注定不发生、不留任何状态）：返回包装本哨兵的
+//     错误并打 Warn 日志——GoBackground（本错误），对齐 WorkerManager 的
+//     ErrManagerClosed（AddTicker/AddOnce 同款 Warn + 哨兵错误）；
+//   - 「照常入队但注定不执行」面（受 #99 收敛语义约束，closer/钩子仍被
+//     记录）：注册时打 ERROR 留痕——AddResourceTimeout（closeDone，#99）
+//     与 AddPreCloseHook（preCloseDone，#186）同口径；
+//   - 三条 godoc（GoBackground / AddResourceTimeout / AddPreCloseHook）
+//     交叉引用本纪律；errors.Is(err, ErrAppClosed) 可判定拒绝。
+var ErrAppClosed = errors.New("bootstrap: app is shutting down")
 
 // NewApp 创建应用生命周期管理器，挂到调用方传入的 lifecycle.Manager 上（attach 模式）。
 //
@@ -182,7 +207,8 @@ func (a *App) AddResource(name string, closer func(context.Context) error) {
 //
 // 关停边界（#99）：关闭序列启动后（close 阶段收敛循环结束前）注册的
 // closer 仍会被执行；close 阶段已结束后注册的 closer 永远不会执行
-// （打 ERROR 留痕）。
+// （打 ERROR 留痕；#186 统一纪律见 ErrAppClosed——「照常入队但注定
+// 不执行」面打 ERROR，硬拒绝面 GoBackground 返回 ErrAppClosed）。
 func (a *App) AddResourceTimeout(name string, timeout time.Duration, closer func(context.Context) error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -207,9 +233,19 @@ func (a *App) AddResourceTimeout(name string, timeout time.Duration, closer func
 //
 // GoBackground 后台任务的排空在 wait 阶段（其后）——钩子执行时后台任务
 // 可能仍在收尾，钩子里访问「后台任务共写的共享状态」需自行同步。
+//
+// 关停边界（#186）：钩子队列收敛（close 阶段的 runPreCloseHooks 取空返回，
+// preCloseDone 置位）之后注册的钩子永远不会被执行（不再有收敛轮次），
+// 注册时打 ERROR 留痕——与 AddResourceTimeout 的 closeDone 同口径（统一
+// 纪律见 ErrAppClosed）。收敛前（含 close 阶段进行中）注册的钩子仍会被
+// 下一轮 take 补齐执行（drainClosers 的收敛语义，#99 同款）。
 func (a *App) AddPreCloseHook(name string, hook func(ctx context.Context) error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.preCloseDone {
+		logger.Error("pre-close hook added after close phase completed; it will never run",
+			"hook", name)
+	}
 	a.preClose = append(a.preClose, namedCloser{name: name, closer: hook, timeout: 0})
 }
 
@@ -223,12 +259,14 @@ func (a *App) runPreCloseHooks(ctx context.Context) error {
 	return drainClosers(ctx, a.takePreClose, "hook", "pre-close hook failed", "pre-close hook done")
 }
 
-// takePreClose 锁内取队首前置钩子（FIFO：按注册顺序执行），取空返回 false。
+// takePreClose 锁内取队首前置钩子（FIFO：按注册顺序执行），取空时置
+// preCloseDone（#186：此后 AddPreCloseHook 的钩子永远不会执行）并返回 false。
 // 「锁内取、锁外执行」纪律（#102）由调用方 drainClosers 保证。
 func (a *App) takePreClose() (namedCloser, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if len(a.preClose) == 0 {
+		a.preCloseDone = true
 		return namedCloser{}, false
 	}
 	h := a.preClose[0]
@@ -264,7 +302,7 @@ func drainClosers(ctx context.Context, take func() (namedCloser, bool), kindKey,
 			return errors.Join(errs...)
 		}
 		if err := runCloserWithBudget(ctx, c); err != nil {
-			logger.Error(failMsg, kindKey, c.name, "err", err)
+			logger.Error(failMsg, kindKey, c.name, logx.ErrKey, err)
 			errs = append(errs, fmt.Errorf("%s: %w", c.name, err))
 		} else {
 			logger.Info(okMsg, kindKey, c.name)
@@ -275,16 +313,19 @@ func drainClosers(ctx context.Context, take func() (namedCloser, bool), kindKey,
 // GoBackground 启动一个带 panic recovery 的后台 goroutine。
 // 关闭时通过 ctx 取消信号通知退出，并等待所有后台任务完成。
 //
-// 关停边界（#104）：shutdown 序列启动（app-lifecycle:cancel 阶段）之后再
-// 调用会被拒绝并打 Warn 日志——fn 不执行。此前该窗口内的 wg.Add（正
-// delta）与 wait 阶段 timedWait 的 wg.Wait 并发，属于 sync.WaitGroup 规则
-// 的未定义行为（counter 为零时 Wait 运行中发起 Add，可能 panic 或漏等）。
-func (a *App) GoBackground(name string, fn func(ctx context.Context)) {
+// 返回 error（#186）：注册被拒时可感知——关停序列启动（app-lifecycle:cancel
+// 阶段，#104）之后再调用会返回包装 ErrAppClosed 的错误并打 Warn 日志，fn
+// 不执行。此前该窗口内的调用只打 Warn、无返回值，调用方无法感知任务被丢弃
+// （对齐 WorkerManager.AddTicker/AddOnce 的 ErrManagerClosed 同款处置，统一
+// 纪律见 ErrAppClosed）。该拒绝同时消除了 sync.WaitGroup 规则的未定义行为：
+// 关停窗口内的 wg.Add（正 delta）与 wait 阶段 timedWait 的 wg.Wait 并发，
+// 属于「counter 为零时 Wait 运行中发起 Add」的未定义形态（可能 panic 或漏等）。
+func (a *App) GoBackground(name string, fn func(ctx context.Context)) error {
 	a.mu.Lock()
 	if a.closing {
 		a.mu.Unlock()
 		logger.Warn("app shutting down, background task rejected", "task", name)
-		return
+		return fmt.Errorf("%w: background task %q registration dropped", ErrAppClosed, name)
 	}
 	// wg.Add 在锁内、closing 检查之后：与 timedWait 的 wg.Wait 之间由
 	// closing 置位（同锁、且发生在 cancel 阶段）全序化——Wait 启动后
@@ -295,6 +336,7 @@ func (a *App) GoBackground(name string, fn func(ctx context.Context)) {
 		defer a.wg.Done()
 		fn(a.ctx)
 	})
+	return nil
 }
 
 // RequestShutdown 请求应用进入关闭流程：取消根 context，解除 userFn 中
@@ -383,7 +425,7 @@ func (a *App) timedWait(ctx context.Context) {
 		// 只会因调用方显式取消 Shutdown 的 ctx 而 Done（Bootstrapper.Run 传
 		// Background，永不取消）——按「显式放弃等待」处理。
 		logger.Warn("shutdown context cancelled, skipping goroutine drain",
-			"err", ctx.Err())
+			logx.ErrKey, ctx.Err())
 	}
 }
 

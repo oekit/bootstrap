@@ -237,13 +237,13 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 		errChDrained = true
 		runErr = err
 		if err != nil {
-			logger.Error("userFn returned error", "err", err)
+			logger.Error("userFn returned error", logx.ErrKey, err)
 		} else {
 			logger.Info("userFn returned, shutting down...")
 		}
 		signal.Stop(sigCh)
 	case err := <-app.fatalCh:
-		logger.Error("fatal error triggered shutdown", "err", err)
+		logger.Error("fatal error triggered shutdown", logx.ErrKey, err)
 		signal.Stop(sigCh)
 	}
 
@@ -278,7 +278,7 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 		}
 	}
 	if ferr := app.fatalError(); ferr != nil {
-		logger.Error("fatal error during run", "err", ferr)
+		logger.Error("fatal error during run", logx.ErrKey, ferr)
 		if runErr != nil {
 			runErr = fmt.Errorf("%w; fatal: %w", runErr, ferr)
 		} else {

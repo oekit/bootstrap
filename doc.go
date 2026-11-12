@@ -37,13 +37,14 @@
 //
 // # attach 模式（NewApp）
 //
-// bootstrap.NewApp(mgr *shutdown.Manager) 是 **attach 模式**入口：只把
-// app-lifecycle 四阶段挂到调用方的 shutdown.Manager 上，**不接管信号与
+// bootstrap.NewApp(mgr *lifecycle.Manager)（github.com/oekit/core/lifecycle）
+// 是 **attach 模式**入口：只把 app-lifecycle 四阶段挂到调用方的
+// lifecycle.Manager 上，**不接管信号与
 // server**——不调用 signal.Notify、不调用 h.Spin，SIGINT/SIGTERM 与服务
 // 启停由宿主负责。适合宿主已有 Spin/OnShutdown 生命周期（如 hertz），
 // 只想补上「ctx 取消 + 资源关闭 + 后台任务 drain」的场景：
 //
-//	teardown := shutdown.New(30 * time.Second)
+//	teardown := lifecycle.New(30 * time.Second)
 //	app := bootstrap.NewApp(teardown)
 //	app.GoBackground("outbox", outbox.Run)
 //	app.AddResource("redis", func(ctx context.Context) error { return rdb.Close() })
