@@ -97,7 +97,7 @@ func TestTimedWait_DrainTimeoutWarnsWithRunningCount(t *testing.T) {
 	releaseTask := func() { releaseOnce.Do(func() { close(release) }) }
 	t.Cleanup(releaseTask) // 无论断言成败都不留卡死 goroutine（只关一次）
 
-	if err := app.GoBackground("stuck-task", func(context.Context) {
+	if err := app.TryGoBackground("stuck-task", func(context.Context) {
 		close(started)
 		<-release // 不看 ctx：模拟卡死、永不自行退出的任务
 	}); err != nil {
