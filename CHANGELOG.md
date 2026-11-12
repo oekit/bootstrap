@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.9] — 2026-11-13
+
+- 5 单修复：beforeServe panic 隔离（#201）、ReadyFatalOverride 三态（#202）、WithReadyTimeout(0) 归一（#203）、drain 超时告警 running 计数（#205）、WithShutdownTimeout(0) 归一（#206）；地板对齐 pkg v0.47.0/core v0.15.1。
+
 ## [obs/v0.2.26] — 2026-11-12
 
 - Go 1.26 现代化：healthz.go sort.Slice→slices.SortFunc、计数循环→range N；全模块依赖地板对齐 concurrency v0.34.1。纯等价重构+地板追平，行为零变更。
