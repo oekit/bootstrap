@@ -167,9 +167,35 @@ func (w *WorkerManager) markClosed() {
 // sync.WaitGroup 规则的未定义行为（runtime 以「sync: WaitGroup misuse:
 // Add called concurrently with Wait」panic 拒绝）——App 侧 #104 修过同款
 // 问题，本方法是被 #183 点名的漏网旁路。「Wait 期间继续注册」的形态
-// 与 WaitGroup 铁律（Wait 后不得再 Add）冲突，不提供；需要「取消任务 +
-// 等待」的完整关停用 Close/CloseTimeout。多次调用安全。
+// 与 WaitGroup 铁律（Wait 后不得再 Add）冲突，不提供。多次调用安全。
+//
+// ⚠️ 本方法**不取消 context**（与 Close 的本质差异）：AddTicker 的任务
+// goroutine 唯一退出路径是 ctx 取消，因此只要注册过任何周期任务，本方法
+// 永不返回（#210，已实测钉住）——「等待所有任务退出」只在仅注册过有限
+// 任务（AddOnce）时成立。需要「取消任务 + 等待」的完整关停用
+// Close/CloseTimeout；需要「不取消、等存量自然结束」的有界等待用
+// WaitTimeout（#210）。
 func (w *WorkerManager) Wait() {
 	w.markClosed()
 	w.wg.Wait()
+}
+
+// WaitTimeout 是带超时的 Wait（#210）：先关闸（同 Wait，#183 并发纪律），
+// 最多等待 d——到点存量任务仍未全部退出则打 ERROR 留痕并返回 false。
+// 给「不取消任务、等存量自然结束」的调用方一个有界出口：Wait 对周期任务
+// 永不返回（AddTicker 的 goroutine 唯一退出路径是 ctx 取消，而 Wait 不取消
+// context），裸死等与 #98 修掉的 Close 死等同款故障类。注意超时放弃的只是
+// 等待者，任务未被取消、照常运行——实际停止任务仍需 Close/CloseTimeout。
+// 返回 true = 存量任务已全部退出；false = 超时放弃、仍有任务在跑。
+// d <= 0 等同 Wait（无限等待）。多次调用安全（与 Close/CloseTimeout 混用
+// 亦然）。「wg.Wait 带超时放弃」的实现与权衡注释单源于 waitWithTimeout
+// （#179，与 App.timedWait / CloseTimeout 共用）。
+func (w *WorkerManager) WaitTimeout(d time.Duration) bool {
+	w.markClosed()
+	if waitWithTimeout(&w.wg, nil, d) == waitTimedOut {
+		logger.Error("worker manager wait timeout, tasks still running",
+			"timeout", d.String())
+		return false
+	}
+	return true
 }
