@@ -2,6 +2,18 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [obs/v0.2.26] — 2026-11-12
+
+- Go 1.26 现代化：healthz.go sort.Slice→slices.SortFunc、计数循环→range N；全模块依赖地板对齐 concurrency v0.34.1。纯等价重构+地板追平，行为零变更。
+
+## [nacos/v0.3.24] — 2026-11-12
+
+- Go 1.26 现代化：healthz.go sort.Slice→slices.SortFunc、计数循环→range N；全模块依赖地板对齐 concurrency v0.34.1。纯等价重构+地板追平，行为零变更。
+
+## [v0.7.8] — 2026-11-12
+
+- Go 1.26 现代化：healthz.go sort.Slice→slices.SortFunc、计数循环→range N；全模块依赖地板对齐 concurrency v0.34.1。纯等价重构+地板追平，行为零变更。
+
 ## [obs/v0.2.25] — 2026-11-12
 
 - 全仓 issue 清零（#177-#183）：drainClosers 收敛 closer 执行引擎（#177）、runCloserWithBudget 与 core/lifecycle 对齐性钉住（#178）、waitWithTimeout 单源「wg.Wait 带超时放弃」（#179）、nacos Init 拆函数拆文件（#180）、mergeTeardownErrs 收敛关停错误并入（#181）、panic→error 四出口收编 pkg/errors.Recovered（#182）、WorkerManager.Wait 并发注册竞态修复（#183）；Go 地板 1.26.0 + pkg v0.45.0/logx v0.10.0/metrics v0.3.0/registry v0.5.15/registry/nacos v0.1.14/registry/nacosimpl v0.2.0 地板对齐
