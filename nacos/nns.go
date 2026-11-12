@@ -191,7 +191,7 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 			Port:    c.Port,
 			Since:   time.Now(),
 		})
-		if err := app.GoBackground("nns-register", func(ctx context.Context) {
+		if err := app.TryGoBackground("nns-register", func(ctx context.Context) {
 			if c.registerWhenReady(ctx, app) {
 				c.registerAndWire(ctx, app, nnsc)
 			}

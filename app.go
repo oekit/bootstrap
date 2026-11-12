@@ -318,14 +318,20 @@ func drainClosers(ctx context.Context, take func() (namedCloser, bool), kindKey,
 // GoBackground 启动一个带 panic recovery 的后台 goroutine。
 // 关闭时通过 ctx 取消信号通知退出，并等待所有后台任务完成。
 //
-// 返回 error（#186）：注册被拒时可感知——关停序列启动（app-lifecycle:cancel
-// 阶段，#104）之后再调用会返回包装 ErrAppClosed 的错误并打 Warn 日志，fn
-// 不执行。此前该窗口内的调用只打 Warn、无返回值，调用方无法感知任务被丢弃
-// （对齐 WorkerManager.AddTicker/AddOnce 的 ErrManagerClosed 同款处置，统一
-// 纪律见 ErrAppClosed）。该拒绝同时消除了 sync.WaitGroup 规则的未定义行为：
-// 关停窗口内的 wg.Add（正 delta）与 wait 阶段 timedWait 的 wg.Wait 并发，
-// 属于「counter 为零时 Wait 运行中发起 Add」的未定义形态（可能 panic 或漏等）。
-func (a *App) GoBackground(name string, fn func(ctx context.Context)) error {
+// 关停序列启动（app-lifecycle:cancel 阶段，#104）之后再调用：注册被拒、fn
+// 不执行，打 Warn 日志（拒绝同时消除 sync.WaitGroup 规则的未定义形态——
+// 关停窗口内的正 delta Add 与 timedWait 的 Wait 并发）。需要感知拒绝结果的
+// 调用方用 [App.TryGoBackground]（#186）；本方法保持 void 是为了持续满足
+// [lifecycle.App] 接口契约（transport 适配层 RunServer 的最小生命周期面）。
+func (a *App) GoBackground(name string, fn func(ctx context.Context)) {
+	_ = a.TryGoBackground(name, fn)
+}
+
+// TryGoBackground 是 [App.GoBackground] 的可感知变体（#186）：关停窗口内的
+// 注册被拒时返回包装 [ErrAppClosed] 的错误（fn 不执行、打 Warn 日志），
+// 成功注册返回 nil。对齐 WorkerManager.AddTicker/AddOnce 的 ErrManagerClosed
+// 同款处置，统一纪律见 ErrAppClosed。
+func (a *App) TryGoBackground(name string, fn func(ctx context.Context)) error {
 	a.mu.Lock()
 	if a.closing {
 		a.mu.Unlock()
