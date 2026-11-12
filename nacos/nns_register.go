@@ -13,6 +13,7 @@ import (
 
 	"github.com/oekit/bootstrap"
 	"github.com/oekit/core/version"
+	"github.com/oekit/logx"
 	"github.com/oekit/registry"
 )
 
@@ -43,7 +44,12 @@ func (c *NNSComponent) registerWhenReady(ctx context.Context, app *bootstrap.App
 	if timeout == 0 {
 		timeout = time.Duration(readyTimeoutNanos.Load())
 	}
-	fatal := c.ReadyFatal || readyFatal.Load() // 组件字段优先级高于全局缺省（#74）
+	// 取或：裸 ReadyFatal 只有抬升权（#74）；显式覆盖走三态字段（#202）——
+	// *false 在全局已置位时按组件粒度关掉 fail-fast（逃生舱）。
+	fatal := c.ReadyFatal || readyFatal.Load()
+	if c.ReadyFatalOverride != nil {
+		fatal = *c.ReadyFatalOverride
+	}
 	var timer *time.Timer
 	var timeoutCh <-chan time.Time
 	if timeout > 0 {
@@ -104,7 +110,7 @@ func (c *NNSComponent) registerAndWire(ctx context.Context, app *bootstrap.App, 
 			c.abandonRegister(nnsc, err)
 			return
 		}
-		logger.Error("nns register failed (deferred) — service will NOT be discoverable", "err", err)
+		logger.Error("nns register failed (deferred) — service will NOT be discoverable", logx.ErrKey, err)
 		c.setRegisterState(&RegisterState{
 			Phase:   PhaseFailed,
 			Service: c.NacosCfg.ServiceName,
@@ -121,7 +127,7 @@ func (c *NNSComponent) registerAndWire(ctx context.Context, app *bootstrap.App, 
 		// 都失效（Run 永不返回 / 返回 nil 退出码 0）。
 		if c.Required {
 			logger.Error("nns register failed on required component, failing fast",
-				"service", c.NacosCfg.ServiceName, "err", err)
+				"service", c.NacosCfg.ServiceName, logx.ErrKey, err)
 			app.Fail(fmt.Errorf("nns: register failed on required component %s: %w",
 				c.NacosCfg.ServiceName, err))
 		}
@@ -150,14 +156,14 @@ func (c *NNSComponent) registerAndWire(ctx context.Context, app *bootstrap.App, 
 // RegisterState.DeregisterErr，供巡检核查幽灵实例。
 func (c *NNSComponent) abandonRegister(nnsc nnsClient, regErr error) {
 	logger.Error("nns register cancelled during shutdown — registration may have reached the server, best-effort deregistering",
-		"service", c.NacosCfg.ServiceName, "err", regErr)
+		"service", c.NacosCfg.ServiceName, logx.ErrKey, regErr)
 
 	deregCtx, cancel := context.WithTimeout(context.Background(), abandonedDeregisterTimeout)
 	deregErr := nnsc.Deregister(deregCtx, c.Port)
 	cancel()
 	if deregErr != nil {
 		logger.Error("nns best-effort deregister failed after cancelled register — ghost instance possible until nacos ephemeral timeout",
-			"service", c.NacosCfg.ServiceName, "err", deregErr)
+			"service", c.NacosCfg.ServiceName, logx.ErrKey, deregErr)
 	}
 
 	c.setRegisterState(&RegisterState{

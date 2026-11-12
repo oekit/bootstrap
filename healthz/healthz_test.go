@@ -11,7 +11,7 @@ import (
 )
 
 func reset() {
-	ResetForTest()
+	resetForTest()
 }
 
 // TestHandle_NoChecks 验证无 check 时直接返 200 + "ok"。
@@ -150,10 +150,10 @@ func TestHandle_Deregister(t *testing.T) {
 // 阻塞 Handle — 总超时(默认 5s,测试里调短)后统一记 "check timeout"
 // 返回 503,ctx 也注入了 deadline。
 func TestHandle_SlowCheckTimeout(t *testing.T) {
-	ResetForTest()
+	resetForTest()
 	t.Cleanup(func() {
 		SetCheckTimeout(defaultCheckTimeout)
-		ResetForTest()
+		resetForTest()
 	})
 	SetCheckTimeout(50 * time.Millisecond)
 
@@ -192,10 +192,10 @@ func TestHandle_SlowCheckTimeout(t *testing.T) {
 // 才归一），因此**多轮跑必须每轮都是同一个文案**。用多轮把那条偶发路径
 // 变成必然被撞上的回归——单轮撞不上等于没测。
 func TestHandle_SlowCheckTimeout_StableWording(t *testing.T) {
-	ResetForTest()
+	resetForTest()
 	t.Cleanup(func() {
 		SetCheckTimeout(defaultCheckTimeout)
-		ResetForTest()
+		resetForTest()
 	})
 	SetCheckTimeout(20 * time.Millisecond)
 
@@ -222,10 +222,10 @@ func TestHandle_SlowCheckTimeout_StableWording(t *testing.T) {
 // 总超时之前，那是 check 自己的错，应原样上报，不能被归一成
 // "check timeout"——否则运维分不清「依赖挂了」和「健康检查整体超时」。
 func TestHandle_CheckOwnTimeoutNotTotalTimeout(t *testing.T) {
-	ResetForTest()
+	resetForTest()
 	t.Cleanup(func() {
 		SetCheckTimeout(defaultCheckTimeout)
-		ResetForTest()
+		resetForTest()
 	})
 	SetCheckTimeout(2 * time.Second)
 

@@ -33,7 +33,7 @@ func TestRun_WaitTimeoutZero_WaitsBeyondShutdownTimeout(t *testing.T) {
 	go func() {
 		runDone <- b.Run(func(a *App) error {
 			a.SetWaitTimeout(0) // 文档承诺：无限等待
-			a.GoBackground("hanger", func(_ context.Context) {
+			goBackgroundOrFail(t, a, "hanger", func(_ context.Context) {
 				<-release
 				bgDone.Store(true)
 			})
@@ -79,7 +79,7 @@ func TestRun_DefaultWaitTimeout_NotCappedByShutdownTimeout(t *testing.T) {
 		runDone <- b.Run(func(a *App) error {
 			// 后台任务感知 ctx 取消，但故意拖 300ms（超过 150ms 预算，
 			// 远小于 30s 默认 drain）才退出
-			a.GoBackground("slow-exit", func(ctx context.Context) {
+			goBackgroundOrFail(t, a, "slow-exit", func(ctx context.Context) {
 				<-ctx.Done()
 				time.Sleep(300 * time.Millisecond)
 			})

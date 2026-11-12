@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,15 @@ import (
 
 	"github.com/oekit/core/lifecycle"
 )
+
+// goBackgroundOrFail 启动后台任务，注册被拒时失败测试（#186 起 GoBackground
+// 返回 error，正常路径必须为 nil）。
+func goBackgroundOrFail(t *testing.T, app *App, name string, fn func(ctx context.Context)) {
+	t.Helper()
+	if err := app.GoBackground(name, fn); err != nil {
+		t.Fatalf("GoBackground(%q) rejected: %v", name, err)
+	}
+}
 
 // TestApp_Context_NotNil verifies the App exposes a non-nil context.
 func TestApp_Context_NotNil(t *testing.T) {
@@ -112,7 +122,7 @@ func TestApp_GoBackground_RunsAndExitsOnContextCancel(t *testing.T) {
 
 	started := make(chan struct{})
 	exited := make(chan struct{})
-	app.GoBackground("test-bg", func(ctx context.Context) {
+	goBackgroundOrFail(t, app, "test-bg", func(ctx context.Context) {
 		close(started)
 		<-ctx.Done()
 		close(exited)
@@ -146,7 +156,7 @@ func TestApp_GoBackground_ServerExitsOnResourceClose(t *testing.T) {
 	// Simulate a server: blocks until shutdownFn is called.
 	shutdownCh := make(chan struct{})
 	exited := make(chan struct{})
-	app.GoBackground("fake-server", func(_ context.Context) {
+	goBackgroundOrFail(t, app, "fake-server", func(_ context.Context) {
 		defer close(exited)
 		<-shutdownCh // blocks like h.Run() until Shutdown is called
 	})
@@ -173,7 +183,7 @@ func TestApp_GoBackground_DrainTimeout(t *testing.T) {
 	app := NewApp(mgr)
 	app.SetWaitTimeout(100 * time.Millisecond) // short timeout for test
 
-	app.GoBackground("hanger", func(_ context.Context) {
+	goBackgroundOrFail(t, app, "hanger", func(_ context.Context) {
 		select {} // blocks forever, ignoring context cancellation
 	})
 
@@ -199,7 +209,7 @@ func TestApp_GoBackground_DrainContextCancelled(t *testing.T) {
 	app := NewApp(mgr)
 	app.SetWaitTimeout(10 * time.Second) // long timeout — won't fire
 
-	app.GoBackground("hanger", func(_ context.Context) {
+	goBackgroundOrFail(t, app, "hanger", func(_ context.Context) {
 		select {} // blocks forever
 	})
 
@@ -228,7 +238,7 @@ func TestApp_GoBackground_DrainContextCancelled_NoTimeout(t *testing.T) {
 	app := NewApp(mgr)
 	app.SetWaitTimeout(0) // infinite wait
 
-	app.GoBackground("hanger", func(_ context.Context) {
+	goBackgroundOrFail(t, app, "hanger", func(_ context.Context) {
 		select {} // blocks forever
 	})
 
@@ -257,7 +267,7 @@ func TestApp_GoBackground_PanicRecovered(t *testing.T) {
 	app := NewApp(mgr)
 
 	exited := make(chan struct{})
-	app.GoBackground("panicker", func(_ context.Context) {
+	goBackgroundOrFail(t, app, "panicker", func(_ context.Context) {
 		defer close(exited)
 		panic("test panic")
 	})
@@ -470,7 +480,7 @@ func TestApp_ReadyGate_Idempotent(t *testing.T) {
 func TestApp_ReadyGate_UnblocksWaiter(t *testing.T) {
 	app := NewApp(lifecycle.New(100 * time.Millisecond))
 	released := make(chan struct{})
-	app.GoBackground("waiter", func(ctx context.Context) {
+	goBackgroundOrFail(t, app, "waiter", func(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 		case <-app.ReadyChan():
@@ -565,10 +575,12 @@ func TestApp_LateAddResourceDuringCloseStillClosed(t *testing.T) {
 	}
 }
 
-// TestApp_GoBackgroundRejectedAfterShutdownStarts 钉住 #104：shutdown 序列
-// 启动（app-lifecycle:cancel 已执行）后 GoBackground 必须拒绝并留痕。此前
-// 该窗口内的 wg.Add（正 delta）与 wait 阶段 timedWait 的 wg.Wait 并发，
-// 属于 sync.WaitGroup 规则未定义行为（counter 为零时 Wait 运行中 Add）。
+// TestApp_GoBackgroundRejectedAfterShutdownStarts 钉住 #104/#186：shutdown
+// 序列启动（app-lifecycle:cancel 已执行）后 GoBackground 必须拒绝并留痕，
+// 且返回包装 ErrAppClosed 的错误（#186：拒绝可感知，对齐 WorkerManager 的
+// ErrManagerClosed）。此前该窗口内的 wg.Add（正 delta）与 wait 阶段
+// timedWait 的 wg.Wait 并发，属于 sync.WaitGroup 规则未定义行为（counter
+// 为零时 Wait 运行中 Add）。
 func TestApp_GoBackgroundRejectedAfterShutdownStarts(t *testing.T) {
 	mgr := lifecycle.New(2 * time.Second)
 	app := NewApp(mgr)
@@ -583,7 +595,7 @@ func TestApp_GoBackgroundRejectedAfterShutdownStarts(t *testing.T) {
 	<-app.Context().Done()
 
 	var ran atomic.Bool
-	app.GoBackground("late", func(context.Context) { ran.Store(true) })
+	err := app.GoBackground("late", func(context.Context) { ran.Store(true) })
 
 	select {
 	case <-shutdownDone:
@@ -594,6 +606,12 @@ func TestApp_GoBackgroundRejectedAfterShutdownStarts(t *testing.T) {
 	// shutdownDone 之后 ran 必为定值，无需 sleep。
 	if ran.Load() {
 		t.Fatal("shutdown 启动后 GoBackground 的任务不应执行（#104）")
+	}
+	if !errors.Is(err, ErrAppClosed) {
+		t.Fatalf("shutdown 启动后 GoBackground 应返回 ErrAppClosed（#186）, got %v", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), `"late"`) {
+		t.Fatalf("拒绝错误应携带任务名便于排障, got %v", err)
 	}
 }
 
