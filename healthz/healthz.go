@@ -58,11 +58,12 @@
 package healthz
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -220,7 +221,7 @@ func Handle(ctx context.Context) (int, string) {
 	}
 
 	// 排序让输出稳定(便于日志 diff)
-	sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
+	slices.SortFunc(entries, func(a, b checkEntry) int { return cmp.Compare(a.name, b.name) })
 
 	// 总超时同时注入 check ctx(deadline 感知的依赖能提前中止)。
 	//
@@ -260,7 +261,7 @@ func Handle(ctx context.Context) (int, string) {
 	degraded := map[string]string{}
 	returned := make(map[string]bool, len(entries))
 collect:
-	for done := 0; done < len(entries); done++ {
+	for range len(entries) {
 		select {
 		case r := <-ch:
 			returned[r.name] = true
