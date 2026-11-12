@@ -3,7 +3,7 @@ module github.com/oekit/bootstrap/obs
 go 1.26.0
 
 require (
-	github.com/oekit/bootstrap v0.7.8
+	github.com/oekit/bootstrap v0.7.10
 	github.com/oekit/core v0.15.1
 	github.com/oekit/logx v0.10.0
 	github.com/oekit/metrics v0.3.1
