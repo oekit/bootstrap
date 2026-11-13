@@ -101,7 +101,20 @@ type NNSComponent struct {
 	// 服务静默永不注册——注册中心缺失在集群部署下等于服务不存在，早死优于
 	// 带日志的静默降级。缺省 false（告警后继续等就绪、慢启动不误杀，#33 语义
 	// 不变）；经 WithReadyFatal 显式开启。
+	//
+	// 注意本字段只有「抬升」权：判定为 ReadyFatal || 全局 WithReadyFatal
+	// 缺省，置 false 关不掉已开启的全局（bool 零值无法区分「未设置」与
+	// 「显式 false」）——显式关闭用 ReadyFatalOverride（#202）。
 	ReadyFatal bool
+	// ReadyFatalOverride 是 ReadyFatal 的三态显式覆盖（#202）：
+	//   - nil（缺省）：未覆盖——按 ReadyFatal || 全局 WithReadyFatal 缺省
+	//     判定（现状不变）；
+	//   - 非 nil：组件字段显式优先——*false 可在全局 WithReadyFatal 已置位时
+	//     按组件粒度关掉 fail-fast（多 Bootstrapper / 宿主进程的逃生舱），
+	//     *true 等价于 ReadyFatal: true。
+	// 与 ReadyTimeout 的「负值显式关」同一救济口径：显式性由 *bool 承载
+	//（裸 bool 的 false 是零值，表达不了「我显式关」）。
+	ReadyFatalOverride *bool
 
 	// registerState 记录注册流程状态，供 RegistrationState 查询
 	// （状态机见 nns_state.go）。
@@ -178,7 +191,7 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 			Port:    c.Port,
 			Since:   time.Now(),
 		})
-		if err := app.GoBackground("nns-register", func(ctx context.Context) {
+		if err := app.TryGoBackground("nns-register", func(ctx context.Context) {
 			if c.registerWhenReady(ctx, app) {
 				c.registerAndWire(ctx, app, nnsc)
 			}
@@ -237,7 +250,12 @@ func WithNNS(nacosCfg nacospkg.Bootstrap, port int, depServices []string, nnsOpt
 // WithReadyTimeout 调整就绪门看门狗超时（bootstrap#33）。
 //
 // 等待 app.Ready() 超过该时长仍未就绪，则打 ERROR 日志点明「服务不会注册到
-// 注册中心」。传负值关闭看门狗（恢复静默等待的旧行为）。
+// 注册中心」。**0 = 未配置**（#203）：回填默认 30s——配置零值透传
+// WithReadyTimeout(cfg.GetDuration("ready_timeout")) 在配置未填时不再把
+// 「没配置」静默变成「看门狗失效」（#33 补的「服务不会注册到注册中心」
+// 可观测性被一个未文档化的零值掐掉）。传**负值**关闭看门狗（恢复静默
+// 等待的旧行为）。与组件字段的反义在此点破：NNSComponent.ReadyTimeout 的
+// 0 = 回退本全局值（非 0 才是组件优先），选项的 0 = 未配置回默认。
 //
 // ⚠️ 作用域是**进程级全局**（#76）：写入包级 atomic，此后本进程内**所有**
 // NNS 组件（任何 Bootstrapper）在 Init 时读取——与函数选项的常规直觉相反，
@@ -256,6 +274,9 @@ func WithNNS(nacosCfg nacospkg.Bootstrap, port int, depServices []string, nnsOpt
 //	)
 func WithReadyTimeout(d time.Duration) bootstrap.BootstrapperOption {
 	return func(b *bootstrap.Bootstrapper) {
+		if d == 0 {
+			d = defaultReadyTimeout // 0 = 未配置 → 回填默认 30s（#203）
+		}
 		readyTimeoutNanos.Store(int64(d))
 	}
 }
@@ -283,12 +304,14 @@ func WithReadyTimeout(d time.Duration) bootstrap.BootstrapperOption {
 //
 // ⚠️ 作用域同 WithReadyTimeout（#76，进程级全局）：写入包级 atomic，顺序无关、
 // 后写覆盖先写——消费点在注册 goroutine 运行期（组件字段与全局缺省取或，
-// 组件字段优先），选项应用全在 bootstrap.New 阶段、消费在 Run 之后，与
-// WithNNS/WithRequiredNNS 的书写顺序无关。文档曾宣称「须在 WithNNS 之前
-// 应用」——与实现不符，已按真实行为修正（本条注释即权威，同
-// WithReadyTimeout 的纠错）。多 Bootstrapper 场景（测试/宿主进程）会互相
-// 覆盖：需要 per-Bootstrapper 作用域时改用组件字段 NNSComponent.ReadyFatal
-// （显式构造组件 + Bootstrapper.AddComponent）。
+// 裸 ReadyFatal 字段只有「抬升」权），选项应用全在 bootstrap.New 阶段、消费
+// 在 Run 之后，与 WithNNS/WithRequiredNNS 的书写顺序无关。文档曾宣称
+// 「须在 WithNNS 之前应用」——与实现不符，已按真实行为修正（本条注释即
+// 权威，同 WithReadyTimeout 的纠错）。多 Bootstrapper 场景（测试/宿主进程）
+// 会互相覆盖：需要按组件粒度**关掉** fail-fast 时，显式构造组件 +
+// Bootstrapper.AddComponent 并置 NNSComponent.ReadyFatalOverride = &false
+// （#202——裸 ReadyFatal=false 关不掉全局，只有抬升权；早期版本此处宣称
+// 「用组件字段逃生」，探针证伪后已改指逃生舱字段）。
 func WithReadyFatal() bootstrap.BootstrapperOption {
 	return func(b *bootstrap.Bootstrapper) {
 		readyFatal.Store(true)

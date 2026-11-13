@@ -16,7 +16,7 @@ import (
 // 返回 error，正常路径必须为 nil）。
 func goBackgroundOrFail(t *testing.T, app *App, name string, fn func(ctx context.Context)) {
 	t.Helper()
-	if err := app.GoBackground(name, fn); err != nil {
+	if err := app.TryGoBackground(name, fn); err != nil {
 		t.Fatalf("GoBackground(%q) rejected: %v", name, err)
 	}
 }
@@ -595,7 +595,7 @@ func TestApp_GoBackgroundRejectedAfterShutdownStarts(t *testing.T) {
 	<-app.Context().Done()
 
 	var ran atomic.Bool
-	err := app.GoBackground("late", func(context.Context) { ran.Store(true) })
+	err := app.TryGoBackground("late", func(context.Context) { ran.Store(true) })
 
 	select {
 	case <-shutdownDone:

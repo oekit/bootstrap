@@ -9,6 +9,6 @@ require (
 )
 
 require (
-	github.com/oekit/core v0.15.0
-	github.com/oekit/pkg v0.46.0
+	github.com/oekit/core v0.15.2
+	github.com/oekit/pkg v0.47.1
 )

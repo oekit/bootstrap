@@ -30,8 +30,13 @@ type App struct {
 	// 释放类钩子需要依赖资源（DB/连接）仍然在位，在 app-lifecycle:close 的
 	// closeAll 之前执行（drain 之后）——此前 WithShutdownHook 的钩子被静默
 	// 排到 app-lifecycle:wait 之后，依赖已关才跑，正是本类型文档点名的反模式。
-	preClose    []namedCloser
-	wg          sync.WaitGroup
+	preClose []namedCloser
+	wg       sync.WaitGroup
+	// bgRunning 是 GoBackground 的在册 goroutine 计数（#205）：WaitGroup 无
+	// counter，drain 超时告警要兑现 SetWaitTimeout godoc 承诺的「警告仍在
+	// 运行的 goroutine 数量」必须自持计数——锁内与 wg.Add 同窗口加、
+	// goroutine 退出时先减再 wg.Done（告警读到的即「fn 仍在跑」的净数）。
+	bgRunning   atomic.Int64
 	cancel      context.CancelFunc
 	ctx         context.Context
 	waitTimeout time.Duration // GoBackground goroutine drain timeout
@@ -313,14 +318,20 @@ func drainClosers(ctx context.Context, take func() (namedCloser, bool), kindKey,
 // GoBackground 启动一个带 panic recovery 的后台 goroutine。
 // 关闭时通过 ctx 取消信号通知退出，并等待所有后台任务完成。
 //
-// 返回 error（#186）：注册被拒时可感知——关停序列启动（app-lifecycle:cancel
-// 阶段，#104）之后再调用会返回包装 ErrAppClosed 的错误并打 Warn 日志，fn
-// 不执行。此前该窗口内的调用只打 Warn、无返回值，调用方无法感知任务被丢弃
-// （对齐 WorkerManager.AddTicker/AddOnce 的 ErrManagerClosed 同款处置，统一
-// 纪律见 ErrAppClosed）。该拒绝同时消除了 sync.WaitGroup 规则的未定义行为：
-// 关停窗口内的 wg.Add（正 delta）与 wait 阶段 timedWait 的 wg.Wait 并发，
-// 属于「counter 为零时 Wait 运行中发起 Add」的未定义形态（可能 panic 或漏等）。
-func (a *App) GoBackground(name string, fn func(ctx context.Context)) error {
+// 关停序列启动（app-lifecycle:cancel 阶段，#104）之后再调用：注册被拒、fn
+// 不执行，打 Warn 日志（拒绝同时消除 sync.WaitGroup 规则的未定义形态——
+// 关停窗口内的正 delta Add 与 timedWait 的 Wait 并发）。需要感知拒绝结果的
+// 调用方用 [App.TryGoBackground]（#186）；本方法保持 void 是为了持续满足
+// [lifecycle.App] 接口契约（transport 适配层 RunServer 的最小生命周期面）。
+func (a *App) GoBackground(name string, fn func(ctx context.Context)) {
+	_ = a.TryGoBackground(name, fn)
+}
+
+// TryGoBackground 是 [App.GoBackground] 的可感知变体（#186）：关停窗口内的
+// 注册被拒时返回包装 [ErrAppClosed] 的错误（fn 不执行、打 Warn 日志），
+// 成功注册返回 nil。对齐 WorkerManager.AddTicker/AddOnce 的 ErrManagerClosed
+// 同款处置，统一纪律见 ErrAppClosed。
+func (a *App) TryGoBackground(name string, fn func(ctx context.Context)) error {
 	a.mu.Lock()
 	if a.closing {
 		a.mu.Unlock()
@@ -331,9 +342,11 @@ func (a *App) GoBackground(name string, fn func(ctx context.Context)) error {
 	// closing 置位（同锁、且发生在 cancel 阶段）全序化——Wait 启动后
 	// 不再可能出现正 delta Add（#104）。
 	a.wg.Add(1)
+	a.bgRunning.Add(1)
 	a.mu.Unlock()
 	async.GoSafe(func() {
-		defer a.wg.Done()
+		defer a.wg.Done() // LIFO：先减计数再 Done——告警侧读到的恒为「fn 仍在跑」
+		defer a.bgRunning.Add(-1)
 		fn(a.ctx)
 	})
 	return nil
@@ -418,8 +431,11 @@ func (a *App) timedWait(ctx context.Context) {
 	switch waitWithTimeout(&a.wg, ctx.Done(), timeout) {
 	case waitDrained:
 	case waitTimedOut:
+		// running 兑现 SetWaitTimeout godoc 的承诺（#205）：关停是排障黄金
+		// 现场，这行告警是「有 goroutine 没退出、进程正在放弃 drain」的唯一定位
+		// 信号——只有 timeout 拿不到泄漏规模（到底卡了 1 个还是 50 个）。
 		logger.Warn("GoBackground goroutine drain timeout, proceeding with shutdown",
-			"timeout", timeout.String())
+			"timeout", timeout.String(), "running", a.bgRunning.Load())
 	case waitAborted:
 		// 无限等待（SetWaitTimeout(0)，#134）或超时窗口内被显式中止：本 ctx
 		// 只会因调用方显式取消 Shutdown 的 ctx 而 Done（Bootstrapper.Run 传
