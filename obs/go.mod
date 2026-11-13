@@ -5,8 +5,8 @@ go 1.26.0
 require (
 	github.com/oekit/bootstrap v0.7.10
 	github.com/oekit/core v0.15.2
-	github.com/oekit/logx v0.10.0
-	github.com/oekit/metrics v0.3.1
+	github.com/oekit/logx v0.11.0
+	github.com/oekit/metrics v0.4.0
 	github.com/oekit/tracing v0.4.4
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
@@ -21,8 +21,8 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/oekit/concurrency v0.35.1 // indirect
-	github.com/oekit/pkg v0.47.1 // indirect
+	github.com/oekit/concurrency v0.36.0 // indirect
+	github.com/oekit/pkg v0.48.0 // indirect
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
