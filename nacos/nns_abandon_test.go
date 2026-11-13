@@ -85,6 +85,29 @@ func waitAbandoned(t *testing.T, comp *NNSComponent) *RegisterState {
 	}
 }
 
+// waitPhaseFailed 轮询直到状态落 PhaseFailed（或超时 fatal，#220）。
+//
+// 不能在「Register 被尝试」（fake.registered 自增）后一次性断言：计数自增
+// 发生在 Register **入口**，而 PhaseFailed 在 Register 返回错误 + ERROR
+// 日志（stdout 写）之后才由 setRegisterState 落盘——中间隔着不可控的调度
+// 与 I/O 窗口，一次性断言会撞进窗口读到 PhasePending（PR #218 CI 首跑红
+// 实证：got &{Phase:pending}，重跑即绿）。与 waitAbandoned 同口径 eventual
+// 轮询，替代固定余量后的一次性断言。
+func waitPhaseFailed(t *testing.T, comp *NNSComponent) *RegisterState {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		st := comp.RegistrationState()
+		if st != nil && st.Phase == PhaseFailed {
+			return st
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("状态应落 PhaseFailed, got %+v", st)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // TestNNSComponent_RegisterCancelled_BestEffortDeregister 钉住 #136 主路径：
 // Ready 后 Register in-flight 中触发关停（根 ctx 取消）时——
 //   - 必须用独立短超时 ctx best-effort 调一次 Deregister（此前错误分支直接
@@ -196,10 +219,9 @@ func TestNNSComponent_RegisterFailed_PlainError_NoDeregister(t *testing.T) {
 		}
 	}
 
-	st := comp.RegistrationState()
-	if st == nil || st.Phase != PhaseFailed {
-		t.Fatalf("明确失败应落 PhaseFailed, got %+v", st)
-	}
+	// #220：registered 自增在 Register 入口、PhaseFailed 在 Register 返回 +
+	// ERROR 日志之后才落——两者的窗口内一次性断言会读到 PhasePending。
+	st := waitPhaseFailed(t, comp)
 	if n := fake.deregisterCount(); n != 0 {
 		t.Fatalf("明确失败不应触发反注册, got %d 次（#136）", n)
 	}
