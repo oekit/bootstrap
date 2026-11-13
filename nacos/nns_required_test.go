@@ -109,9 +109,10 @@ func TestNNSComponent_RequiredRegisterFail_SoftDependency_KeepsRunning(t *testin
 	case <-time.After(200 * time.Millisecond):
 	}
 
-	if st := comp.RegistrationState(); st == nil || st.Phase != PhaseFailed {
-		t.Fatalf("注册失败后状态应为 PhaseFailed, got %+v", st)
-	}
+	// #220 同族：registered 自增在 Register 入口、PhaseFailed 在 Register
+	// 返回 + ERROR 日志之后才落——固定余量后的一次性断言是同族 flake 温床，
+	// 与 nns_abandon_test 同口径改 eventual 轮询。
+	waitPhaseFailed(t, comp)
 
 	mgr.Shutdown(context.Background())
 }
