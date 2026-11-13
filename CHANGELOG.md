@@ -2,6 +2,12 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.11] — 2026-11-13
+
+- 关停/healthz 批：doc.go/README lifecycle 引用修正（#184）、WithReadyFatal godoc 与实现对齐（#185）、关停期注册语义统一（#186）、ResetForTest 内收（#187）、logx.ErrKey 收口（#188）、Run 裸 panic 修复（#201）、ReadyFatal 组件字段逃生（#202）、零值语义（#203）、告警语义（#205）、配置面收口（#206）、WorkerManager.Wait 永不返回（#210）、NNS 测试相位轮询（#220）
+
+关联问题单：bootstrap#184、bootstrap#185、bootstrap#186、bootstrap#187、bootstrap#188、bootstrap#201、bootstrap#202、bootstrap#203、bootstrap#205、bootstrap#206、bootstrap#210、bootstrap#220。
+
 ## [v0.7.10] — 2026-11-13
 
 - fix(lifecycle): 恢复 GoBackground void 签名满足 lifecycle.App 接口——v0.7.9 的 #186 签名回归导致 kitex/hertz RunServer 编译断裂；error 语义保留为新增 TryGoBackground（nacos 延迟注册与测试迁移）。
