@@ -244,3 +244,89 @@ func TestWorkerManager_Wait_ConcurrentWithAdd_RaceSmoke(t *testing.T) {
 		t.Fatal("并发 Wait/Add 未在时限内收敛：疑似 WaitGroup 违规死锁（#183）")
 	}
 }
+
+// TestWorkerManager_Wait_NeverReturnsWithTicker 钉住 #210（锚点测试）：
+// 注册过 AddTicker 后 Wait 永不返回——ticker goroutine 唯一退出路径是
+// ctx 取消，而 Wait 不取消 context（此前 godoc 宣称「等待所有任务退出」，
+// 对周期任务不成立，且无任何警告）。修的是 godoc 如实点破 + WaitTimeout
+// 出口，Wait 本身语义不变（仅 AddOnce 有限任务时保证返回，#183 用例钉住）。
+// 收尾用 Close 取消 ctx：挂起的 Wait 随 ticker 退出、wg 清零而返回。
+func TestWorkerManager_Wait_NeverReturnsWithTicker(t *testing.T) {
+	wm := NewWorkerManager(context.Background())
+
+	if err := wm.AddTicker("periodic", 20*time.Millisecond, func(context.Context) {}); err != nil {
+		t.Fatalf("AddTicker: %v", err)
+	}
+
+	waitDone := make(chan struct{})
+	go func() {
+		wm.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		t.Fatal("注册过 AddTicker 后 Wait 不应返回（ticker goroutine 只随 ctx 取消退出，Wait 不取消 context——#210）")
+	case <-time.After(300 * time.Millisecond):
+		// 期望路径：300ms 窗口内 Wait 仍挂起。
+	}
+
+	// Close 取消 ctx ⇒ ticker 退出 ⇒ wg 清零 ⇒ 挂起的 Wait 随之返回。
+	wm.Close()
+	select {
+	case <-waitDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close 取消 ctx 后挂起的 Wait 未随任务退出而返回（#210）")
+	}
+}
+
+// TestWorkerManager_WaitTimeout_TimesOutWithTicker 钉住 #210 的超时面：
+// 注册过 AddTicker 且不取消时，WaitTimeout(d) 必须在预算到点返回 false
+// （不再有「等存量自然结束」的无限死等裸暴露）；CloseTimeout 的 d<=0 兜底
+// 对 WaitTimeout 不需要——d<=0 等同 Wait，语义见 WaitTimeout godoc。
+func TestWorkerManager_WaitTimeout_TimesOutWithTicker(t *testing.T) {
+	wm := NewWorkerManager(context.Background())
+	defer wm.Close() // 超时放弃的只是等待者；任务由 Close 收尾取消
+
+	if err := wm.AddTicker("periodic", 20*time.Millisecond, func(context.Context) {}); err != nil {
+		t.Fatalf("AddTicker: %v", err)
+	}
+
+	start := time.Now()
+	if wm.WaitTimeout(80 * time.Millisecond) {
+		t.Fatal("注册过 AddTicker 且未取消 ctx 时 WaitTimeout 应返回 false（#210）")
+	}
+	elapsed := time.Since(start)
+	if elapsed < 60*time.Millisecond {
+		t.Fatalf("WaitTimeout 未等满预算即返回: elapsed=%v（#210）", elapsed)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("WaitTimeout 仍在死等: elapsed=%v（#210）", elapsed)
+	}
+}
+
+// TestWorkerManager_WaitTimeout_DrainsFiniteTasks 钉住 #210 的 drain 面：
+// 有限任务（AddOnce）退出后 WaitTimeout 返回 true；d<=0 走等同 Wait 的
+// 无限等待路径（waitWithTimeout 退化为裸 wg.Wait）。
+func TestWorkerManager_WaitTimeout_DrainsFiniteTasks(t *testing.T) {
+	wm := NewWorkerManager(context.Background())
+	defer wm.Close()
+
+	// 正预算：任务退出（wg 清零）后返回 true。
+	release := make(chan struct{})
+	if err := wm.AddOnce("finite", func(context.Context) { <-release }); err != nil {
+		t.Fatalf("AddOnce: %v", err)
+	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		close(release)
+	}()
+	if !wm.WaitTimeout(3 * time.Second) {
+		t.Fatal("有限任务退出后 WaitTimeout 应返回 true（drain 成功，#210）")
+	}
+
+	// d<=0：等同 Wait 的无限等待路径——计数已清零，立即返回 true。
+	if !wm.WaitTimeout(0) {
+		t.Fatal("d<=0 应走无限等待路径并在计数清零后立即返回 true（#210）")
+	}
+}
