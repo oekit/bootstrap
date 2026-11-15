@@ -2,6 +2,24 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [nacos/v0.3.25] — 2026-11-15
+
+- 排空预算独立（#253）：app-lifecycle:drain 注册 timeout 0→-1，排空预算只归 SetDrainTimeout 管辖，不再被 WithShutdownTimeout(10s) 封顶，Shutdown ctx 仍传播为中止信号
+- healthz 超时竞态（#254）：结果与 deadline 同时就绪时先非阻塞排空结果通道再记 timeout，已完成的 check 不再被随机选中的 deadline 丢弃
+- NNS 服务名回填与建连前校验（#255）：NNSComponent 实现 ServiceNameAware 空值回填；Addr 已配而 nacos.service_name 为空时 Required 返回 ErrServiceNameEmpty、软依赖 Warn 跳过（改动在嵌套 nacos 模块，随 train 同发）
+- AddOnce panic 口径（#256）：与 AddTicker 同款内层 recover 单源 runTaskPanicContained，panic 日志带 task= 名，不再直落 async 全局 handler
+
+关联问题单：bootstrap#253、bootstrap#254、bootstrap#255、bootstrap#256。
+
+## [v0.7.12] — 2026-11-15
+
+- 排空预算独立（#253）：app-lifecycle:drain 注册 timeout 0→-1，排空预算只归 SetDrainTimeout 管辖，不再被 WithShutdownTimeout(10s) 封顶，Shutdown ctx 仍传播为中止信号
+- healthz 超时竞态（#254）：结果与 deadline 同时就绪时先非阻塞排空结果通道再记 timeout，已完成的 check 不再被随机选中的 deadline 丢弃
+- NNS 服务名回填与建连前校验（#255）：NNSComponent 实现 ServiceNameAware 空值回填；Addr 已配而 nacos.service_name 为空时 Required 返回 ErrServiceNameEmpty、软依赖 Warn 跳过（改动在嵌套 nacos 模块，随 train 同发）
+- AddOnce panic 口径（#256）：与 AddTicker 同款内层 recover 单源 runTaskPanicContained，panic 日志带 task= 名，不再直落 async 全局 handler
+
+关联问题单：bootstrap#253、bootstrap#254、bootstrap#255、bootstrap#256。
+
 ## [v0.7.11] — 2026-11-13
 
 - 关停/healthz 批：doc.go/README lifecycle 引用修正（#184）、WithReadyFatal godoc 与实现对齐（#185）、关停期注册语义统一（#186）、ResetForTest 内收（#187）、logx.ErrKey 收口（#188）、Run 裸 panic 修复（#201）、ReadyFatal 组件字段逃生（#202）、零值语义（#203）、告警语义（#205）、配置面收口（#206）、WorkerManager.Wait 永不返回（#210）、NNS 测试相位轮询（#220）
