@@ -205,7 +205,8 @@ type Result struct {
 // (默认 5s,SetCheckTimeout 调整/关闭):超时的 check 统一记为
 // "check timeout",并且每个 check 的 ctx 注入 deadline,支持 ctx 的
 // 依赖(DB Ping 等)能第一时间中止 — 挂死的 check 不再无限阻塞
-// liveness/readiness 探测(2026-09-05 复审修复)。
+// liveness/readiness 探测(2026-09-05 复审修复)。超时到点时**结果已就绪**
+// 的 check 不会被误记成 timeout(收集段超时退出后先非阻塞排空通道,#254)。
 func Handle(ctx context.Context) (int, string) {
 	if global.closed.Load() {
 		body, _ := json.Marshal(Result{Status: StatusUnhealthy, Closed: true})
@@ -240,17 +241,13 @@ func Handle(ctx context.Context) (int, string) {
 		defer cancel()
 	}
 
-	type result struct {
-		name string
-		err  error
-	}
-	ch := make(chan result, len(entries))
+	ch := make(chan checkResult, len(entries))
 	for _, e := range entries {
 		// async.GoSafe:满足"禁止裸 go func"的项目约定;check 自身的 panic
 		// 已由 safeRun 收编,这里兜底 goroutine 出口
 		e := e
 		async.GoSafe(func() {
-			ch <- result{name: e.name, err: safeRun(runCtx, e.check)}
+			ch <- checkResult{name: e.name, err: safeRun(runCtx, e.check)}
 		})
 	}
 
@@ -261,37 +258,7 @@ func Handle(ctx context.Context) (int, string) {
 		deadline = timer.C
 	}
 
-	failures := map[string]string{}
-	degraded := map[string]string{}
-	returned := make(map[string]bool, len(entries))
-collect:
-	for range len(entries) {
-		select {
-		case r := <-ch:
-			returned[r.name] = true
-			if r.err != nil {
-				// DegradedError 的降级语义优先:不改判为硬失败/超时,
-				// 记入 degraded map(与 hertz/health 的三态判定一致,oekit#140)
-				var deg *DegradedError
-				if errors.As(r.err, &deg) {
-					degraded[r.name] = deg.Error()
-				} else {
-					failures[r.name] = failureText(r.err, runCtx, timeout)
-				}
-			}
-		case <-deadline:
-			break collect
-		}
-	}
-	// 超时未返回的 check:goroutine 稍后写入 buffered ch(不泄漏 goroutine
-	// 发送),结果记为 timeout
-	if len(returned) < len(entries) {
-		for _, e := range entries {
-			if !returned[e.name] {
-				failures[e.name] = fmt.Sprintf("check timeout after %s", timeout)
-			}
-		}
-	}
+	failures, degraded := collectResults(entries, ch, deadline, timeout, runCtx)
 
 	// 汇总优先级:硬失败 > 降级 > ok。降级不摘流(HTTP 200),硬失败 503;
 	// 硬失败与降级并存时摘流优先,但降级项仍随 body 可见。
@@ -305,6 +272,76 @@ collect:
 	}
 	body, _ := json.Marshal(Result{Status: StatusOK})
 	return 200, string(body)
+}
+
+// checkResult 是单个 check 的执行结果（collect 通道的元素）。类型在包级：
+// collectResults 及其单测（#254）直接驱动本形态，不必经 Handle 起 goroutine。
+type checkResult struct {
+	name string
+	err  error
+}
+
+// collectResults 并发收集 check 结果（Handle 的收集段，抽成可直接单测的形态，
+// #254）。返回 (failures, degraded) 两张 map——硬失败与降级的判定口径
+// （DegradedError 优先、failureText 归一）与 Handle 的汇总优先级不变。
+//
+// #254：deadline 与结果通道同时就绪时，Go select 按均匀伪随机选一个能推进
+// 的分支——超时分支被选中时，已完成 check 的真实结果可能已经躺在 ch 里，
+// 直接 break 会把它漏记成 "check timeout"：成功 check 被误杀成 503（readiness
+// 假摘流）、Degraded 被升级成硬失败、同一份代码在不同调度下产出不确定的
+// body（bootstrap#48「两个定时器赛跑」家族的残留）。因此超时退出后必须先
+// **非阻塞排空** ch 中已就绪的结果，再给仍未返回的 check 补记 timeout；
+// 排空之后才到达的结果才是真超时（ch 缓冲容量 = len(entries)，迟到的发送
+// 不阻塞、不泄漏 goroutine）。
+func collectResults(entries []checkEntry, ch <-chan checkResult, deadline <-chan time.Time, timeout time.Duration, runCtx context.Context) (map[string]string, map[string]string) {
+	failures := map[string]string{}
+	degraded := map[string]string{}
+	returned := make(map[string]bool, len(entries))
+	record := func(r checkResult) {
+		returned[r.name] = true
+		if r.err == nil {
+			return
+		}
+		// DegradedError 的降级语义优先:不改判为硬失败/超时,
+		// 记入 degraded map(与 hertz/health 的三态判定一致,oekit#140)
+		var deg *DegradedError
+		if errors.As(r.err, &deg) {
+			degraded[r.name] = deg.Error()
+			return
+		}
+		failures[r.name] = failureText(r.err, runCtx, timeout)
+	}
+collect:
+	for range len(entries) {
+		select {
+		case r := <-ch:
+			record(r)
+		case <-deadline:
+			break collect
+		}
+	}
+	// 超时退出后先排空已在通道里的结果（#254）：default 分支只在通道排空时
+	// 退出——修复前这里直接补记 timeout，select 抢到 deadline 的那一轮会把
+	// 已完成的 check 一起误杀。
+drain:
+	for {
+		select {
+		case r := <-ch:
+			record(r)
+		default:
+			break drain
+		}
+	}
+	// 超时未返回的 check:goroutine 稍后写入 buffered ch(不泄漏 goroutine
+	// 发送),结果记为 timeout
+	if len(returned) < len(entries) {
+		for _, e := range entries {
+			if !returned[e.name] {
+				failures[e.name] = fmt.Sprintf("check timeout after %s", timeout)
+			}
+		}
+	}
+	return failures, degraded
 }
 
 // errTotalTimeout 是「本次 Handle 的总超时到点」的 cause 标记。
