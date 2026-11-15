@@ -3,11 +3,11 @@ module github.com/oekit/bootstrap/nacos
 go 1.26.0
 
 require (
-	github.com/oekit/bootstrap v0.7.11
+	github.com/oekit/bootstrap v0.7.12
 	github.com/oekit/core v0.15.3
 	github.com/oekit/logx v0.11.0
-	github.com/oekit/nns v0.9.0
-	github.com/oekit/registry v0.6.0
+	github.com/oekit/nns v0.9.1
+	github.com/oekit/registry v0.6.1
 	github.com/oekit/registry/nacos v0.2.0
 )
 
