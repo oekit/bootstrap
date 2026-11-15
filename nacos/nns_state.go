@@ -22,7 +22,9 @@ type RegisterState struct {
 	// Port 是注册端口。
 	Port int
 	// Err 是注册失败时的错误（Phase == PhaseFailed/PhaseAbandoned 时非空；
-	// PhaseAbandoned 下为中断注册的 ctx.Err）。
+	// PhaseAbandoned 下为中断注册的 ctx.Err；PhaseSkipped 下非空表示跳过
+	// 根因——如服务名缺失 #255 的 ErrServiceNameEmpty，Addr 为空的跳过仍
+	// 不带 Err）。
 	Err error
 	// DeregisterErr 记录 PhaseAbandoned 场景下 best-effort 反注册的结果
 	// （#136）：非 nil 表示反注册失败/超时——幽灵实例可能存活到 nacos
@@ -52,7 +54,8 @@ const (
 	// 注册」（PhasePending/PhaseShutdown）可区分，巡检可据此核查幽灵
 	// 实例。
 	PhaseAbandoned RegisterPhase = "abandoned"
-	// PhaseSkipped 表示未启用注册（Port <= 0 或 Nacos 地址为空）。
+	// PhaseSkipped 表示未启用注册（Port <= 0、Nacos 地址为空，或服务名
+	// 缺失被短路——后者 Err 非空点名根因，#255）。
 	PhaseSkipped RegisterPhase = "skipped"
 	// PhaseShutdown 表示进程关停前从未收到就绪信号（就绪门漏接）。
 	PhaseShutdown RegisterPhase = "shutdown"

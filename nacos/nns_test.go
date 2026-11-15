@@ -44,12 +44,33 @@ func TestWithNNS_InjectsComponent(t *testing.T) {
 type fakeNNSClient struct {
 	mu           sync.Mutex
 	initErr      error
+	initCalls    int
+	initService  string
 	registerAt   []time.Time
 	deregisterAt []time.Time
 	closeAt      []time.Time
 }
 
-func (f *fakeNNSClient) Init(_ context.Context, _ string, _ []string) error { return f.initErr }
+// Init 记录调用次数与传入的服务名（#255 断言回填后的服务名真的到达 nns 客户端）。
+func (f *fakeNNSClient) Init(_ context.Context, serviceName string, _ []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.initCalls++
+	f.initService = serviceName
+	return f.initErr
+}
+
+func (f *fakeNNSClient) initCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.initCalls
+}
+
+func (f *fakeNNSClient) initServiceName() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.initService
+}
 
 func (f *fakeNNSClient) Register(_ context.Context, _ int, _ ...registry.RegisterOptionFunc) error {
 	f.mu.Lock()

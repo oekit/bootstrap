@@ -131,10 +131,20 @@ func NewApp(mgr *lifecycle.Manager) *App {
 		a.cancel()
 		return nil
 	}, 0)
+	// drain job 不设预算（timeout < 0，Manager 的「显式无超时」语义）：
+	// 排空时长只由 SetDrainTimeout 管辖（#253）——若用 Manager 默认预算
+	// （timeout=0 ⇒ WithShutdownTimeout，默认 10s），SetDrainTimeout(30s)
+	// 承诺的独立排空预算会被静默砍到 10s：在飞请求 10s 未排完就被切断，
+	// 日志还是 "context cancelled, requests still pending" 而非
+	// "timeout waiting for requests"，排障误判成调用方取消；反向
+	// WithShutdownTimeout(60s) 时缺省排空又会拖过文档的 30s。
+	// wait job 已因完全相同的问题改 -1（#134，见下方注释），drain 是漏改
+	// 的那一个（#253）。ctx 仍作为显式中止信号传播（调用方 Shutdown(ctx)
+	// 取消时放弃等待）。
 	mgr.Add("app-lifecycle:drain", func(ctx context.Context) error {
 		mgr.Drain(ctx)
 		return nil
-	}, 0)
+	}, -1)
 	mgr.Add("app-lifecycle:close", func(ctx context.Context) error {
 		// #168：前置关闭钩子先于资源关闭执行（flush/WAL/许可证类钩子的
 		// 依赖资源此刻仍在位）；钩子错误与资源关闭错误同口径聚合上抛。
