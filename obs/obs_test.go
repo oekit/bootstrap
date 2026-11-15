@@ -32,6 +32,10 @@ func TestMetricsComponent_NameAndSetServiceName(t *testing.T) {
 // 传播器（不建导出器、无网络），并注册 shutdown 钩子。
 func TestTracingComponent_EmptyEndpoint_InstallsLocalProvider(t *testing.T) {
 	c := &TracingComponent{Config: tracing.Config{}}
+	c.SetServiceName("test") // tracing v0.4.6 起 ServiceName 必填（tracing#168）
+	if c.Config.ServiceName != "test" {
+		t.Fatalf("SetServiceName 应回填进 Config.ServiceName: %q", c.Config.ServiceName)
+	}
 	mgr := lifecycle.New(2 * time.Second)
 
 	if err := c.Init(t.Context(), nil, mgr); err != nil {

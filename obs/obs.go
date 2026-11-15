@@ -55,6 +55,14 @@ type TracingComponent struct {
 // Name 返回组件名称。
 func (c *TracingComponent) Name() string { return "tracing" }
 
+// SetServiceName 实现 bootstrap.ServiceNameAware，由 New 统一回填（#131 同款）。
+//
+// tracing v0.4.6 起 ServiceName **必填**（tracing#168：空串会以最后一个
+// detector 身份压过 OTEL_RESOURCE_ATTRIBUTES，Init 直接报错）——本组件必须
+// 接住 bootstrap.WithServiceName 的回填，否则「只配一次服务名」的宿主应用
+// 会在追踪初始化时 fail-loud 而 MetricsComponent 却正常，两组件口径劈叉。
+func (c *TracingComponent) SetServiceName(name string) { c.Config.ServiceName = name }
+
 // Init 初始化 OpenTelemetry 追踪，并注册 shutdown 钩子。
 //
 // 空 Endpoint 的语义与直接调用 tracing.Init 对齐（tracing#60）：不创建
