@@ -61,7 +61,8 @@ func NewWorkerManager(ctx context.Context) *WorkerManager {
 //     ticker 通道缓冲 1，fn 返回时压着一枚堆积滴答，会立即再执行一轮——
 //     24h 间隔的 gc 类慢任务撞上一次超时运行，结束后立刻又跑一轮）。
 //   - 已 Close 后注册被拒绝并返回 ErrManagerClosed（#103）。
-//   - fn panic 被就地收编为 ERROR 日志，后续 tick 继续执行。
+//   - fn panic 被就地收编为带 task 字段的 ERROR 日志，后续 tick 继续执行
+//     （与 AddOnce 同口径，单源 runTaskPanicContained，#256）。
 func (w *WorkerManager) AddTicker(name string, interval time.Duration, fn func(ctx context.Context)) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -85,20 +86,11 @@ func (w *WorkerManager) AddTicker(name string, interval time.Duration, fn func(c
 			case <-w.ctx.Done():
 				return
 			case <-timer.C:
-				// panic 就地收编：GoSafe 的 recover 在 goroutine 出口，
-				// 裸调 fn 一次 panic 就永久打死这个周期任务。收编必须留痕，
-				// 否则任务每轮失败却无任何可观测信号。
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							logger.Error("background task panicked",
-								"task", name,
-								"panic", r,
-								"stack", string(debug.Stack()))
-						}
-					}()
-					fn(w.ctx)
-				}()
+				// panic 就地收编（单源 runTaskPanicContained，#256）：
+				// GoSafe 的 recover 在 goroutine 出口，裸调 fn 一次 panic
+				// 就永久打死这个周期任务。收编必须留痕，否则任务每轮失败却
+				// 无任何可观测信号。
+				runTaskPanicContained(name, func() { fn(w.ctx) })
 				// 完成驱动节拍（#98）：fn 返回后重新起表，把「间隔」语义
 				// 从「滴答节拍」改为「上次完成至今」。此时 timer 已触发且
 				// 通道已排空，Reset 语义安全；慢任务堆积的滴答直接丢弃。
@@ -112,6 +104,10 @@ func (w *WorkerManager) AddTicker(name string, interval time.Duration, fn func(c
 // AddOnce 注册一个一次性任务，在后台执行。
 // 已 Close 后注册被拒绝并返回 ErrManagerClosed、打 Warn 日志（#103）——
 // 不再静默吞掉。
+// fn panic 被就地收编为带 task 字段的 ERROR 日志（与 AddTicker 同口径，
+// 单源 runTaskPanicContained，#256）——此前 panic 直落 async.GoSafe 出口的
+// 全局 handler，日志不带任务标识，同一 WorkerManager 两个注册入口的留痕
+// 口径分裂，排障无法回答「是哪个 once 任务炸的」。
 func (w *WorkerManager) AddOnce(name string, fn func(ctx context.Context)) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -123,9 +119,30 @@ func (w *WorkerManager) AddOnce(name string, fn func(ctx context.Context)) error
 	w.wg.Add(1)
 	async.GoSafe(func() {
 		defer w.wg.Done()
-		fn(w.ctx)
+		runTaskPanicContained(name, func() { fn(w.ctx) })
 	})
 	return nil
+}
+
+// runTaskPanicContained 执行 fn 并就地收编 panic：打带 task 字段的 ERROR
+// 日志（消息与字段口径 AddTicker/AddOnce 单源，#256——此前两处各写一份
+// recover 骨架的演化起点是 AddTicker 独有、AddOnce 缺失，口径分裂）。
+//
+// 为什么必须内层收编而不交给 async.GoSafe 出口：GoSafe 的 recover 汇报到
+// **全局** PanicHandler（缺省 stdlib log，本仓未注入 SetPanicHandler），
+// 既换了日志出口、也不带任务名；且 AddTicker 场景裸调 fn 一次 panic 会
+// 永久打死周期任务，收编后循环才能继续（#98 的可观测性要求）。
+// panic 值原样透出（"panic" 字段），栈取 recover 点的 debug.Stack()。
+func runTaskPanicContained(name string, fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("background task panicked",
+				"task", name,
+				"panic", r,
+				"stack", string(debug.Stack()))
+		}
+	}()
+	fn()
 }
 
 // Close 取消 context、阻止新任务注册并**无限期**等待所有已启动的任务退出。
