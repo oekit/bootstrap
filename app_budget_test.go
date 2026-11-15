@@ -148,3 +148,50 @@ func TestApp_AddResourceTimeout_NotCappedByCloseJobBudget(t *testing.T) {
 		t.Fatalf("outbox 超预算错误应上抛, got %v", errs)
 	}
 }
+
+// TestApp_DrainJob_NotCappedByShutdownTimeout 钉住 #253：drain job 此前以
+// timeout=0 注册（⇒ Manager 默认预算 = WithShutdownTimeout），SetDrainTimeout
+// 承诺的独立排空预算被静默封顶——在飞请求排空时长超过 job 预算时 drain 被
+// ctx.Done 提前切断（日志 "context cancelled, requests still pending" 而非
+// "timeout waiting for requests"），排障误判成调用方取消；反向 WithShutdownTimeout
+// 放大时缺省排空又会拖过文档的 30s。wait job 已因同款问题改 -1（#134），
+// drain 是漏改的那一个。用例：job 预算 150ms、SetDrainTimeout 600ms、在飞
+// 请求 450ms 后 Release（> 预算、< 排空预算）：Shutdown 必须等它排完。
+func TestApp_DrainJob_NotCappedByShutdownTimeout(t *testing.T) {
+	mgr := lifecycle.New(150 * time.Millisecond) // 模拟 WithShutdownTimeout 默认 10s 被压短
+	mgr.SetDrainTimeout(600 * time.Millisecond)  // SetDrainTimeout 承诺的独立排空预算
+	NewApp(mgr)                                  // 注册 app-lifecycle:{cancel,drain,close,wait} 四阶段
+
+	if !mgr.Acquire() {
+		t.Fatal("Shutdown 前 Acquire 应成功")
+	}
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(450 * time.Millisecond)
+		mgr.Release()
+		close(released)
+	}()
+
+	start := time.Now()
+	done := make(chan struct{})
+	go func() {
+		mgr.Shutdown(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown 挂死")
+	}
+	elapsed := time.Since(start)
+
+	<-released
+	if got := mgr.GetRefCount(); got != 0 {
+		t.Fatalf("Shutdown 返回时仍有 %d 个在飞请求——drain 未等排空（#253）", got)
+	}
+	// 350ms 落在「预算切断点 150ms」与「请求排空点 450ms」之间：drain 若仍
+	// 吃 job 预算，Shutdown 约 150ms 就返回（fail）；独立生效则等到 450ms+。
+	if elapsed < 350*time.Millisecond {
+		t.Fatalf("Shutdown 在 %v 返回——drain 等待被 WithShutdownTimeout 预算提前切断（#253）", elapsed)
+	}
+}
