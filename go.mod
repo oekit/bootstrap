@@ -10,5 +10,5 @@ require (
 
 require (
 	github.com/oekit/core v0.15.3
-	github.com/oekit/pkg v0.50.0
+	github.com/oekit/pkg v0.52.0
 )
