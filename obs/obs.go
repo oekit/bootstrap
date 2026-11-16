@@ -16,12 +16,12 @@ package obs
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/oekit/bootstrap"
 	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/logx"
 	"github.com/oekit/metrics"
+	pkgerrors "github.com/oekit/pkg/errors"
 	"github.com/oekit/tracing"
 )
 
@@ -76,7 +76,7 @@ func (c *TracingComponent) Init(_ context.Context, _ *bootstrap.App, mgr *lifecy
 		// 不应随之断掉；打 WARN 点明未启用导出。
 		provider, err := tracing.Init(c.Config)
 		if err != nil {
-			return fmt.Errorf("tracing init: %w", err)
+			return pkgerrors.Wrapf(err, "tracing init")
 		}
 		mgr.Add("tracing", func(ctx context.Context) error {
 			return provider.Shutdown(ctx)
@@ -88,7 +88,7 @@ func (c *TracingComponent) Init(_ context.Context, _ *bootstrap.App, mgr *lifecy
 
 	provider, err := tracing.Init(c.Config)
 	if err != nil {
-		return fmt.Errorf("tracing init: %w", err)
+		return pkgerrors.Wrapf(err, "tracing init")
 	}
 	mgr.Add("tracing", func(ctx context.Context) error {
 		return provider.Shutdown(ctx)
