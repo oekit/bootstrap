@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.13] — 2026-11-16
+
+- refactor: fmt.Errorf → oekit/pkg/errors 三形态对位替换（#520 替换波）+ 依赖地板抬至最新已发布
+
 ## [nacos/v0.3.25] — 2026-11-15
 
 - 排空预算独立（#253）：app-lifecycle:drain 注册 timeout 0→-1，排空预算只归 SetDrainTimeout 管辖，不再被 WithShutdownTimeout(10s) 封顶，Shutdown ctx 仍传播为中止信号
