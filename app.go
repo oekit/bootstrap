@@ -318,7 +318,7 @@ func drainClosers(ctx context.Context, take func() (namedCloser, bool), kindKey,
 		}
 		if err := runCloserWithBudget(ctx, c); err != nil {
 			logger.Error(failMsg, kindKey, c.name, logx.ErrKey, err)
-			errs = append(errs, fmt.Errorf("%s: %w", c.name, err))
+			errs = append(errs, pkgerrors.Wrapf(err, "%s", c.name))
 		} else {
 			logger.Info(okMsg, kindKey, c.name)
 		}

@@ -8,12 +8,12 @@ package nacos
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/oekit/bootstrap"
 	"github.com/oekit/core/version"
 	"github.com/oekit/logx"
+	pkgerrors "github.com/oekit/pkg/errors"
 	"github.com/oekit/registry"
 )
 
@@ -128,8 +128,8 @@ func (c *NNSComponent) registerAndWire(ctx context.Context, app *bootstrap.App, 
 		if c.Required {
 			logger.Error("nns register failed on required component, failing fast",
 				"service", c.NacosCfg.ServiceName, logx.ErrKey, err)
-			app.Fail(fmt.Errorf("nns: register failed on required component %s: %w",
-				c.NacosCfg.ServiceName, err))
+			app.Fail(pkgerrors.Wrapf(err, "nns: register failed on required component %s",
+				c.NacosCfg.ServiceName))
 		}
 		return
 	}

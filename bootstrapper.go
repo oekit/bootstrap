@@ -212,7 +212,7 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 		// 错误会二次爆炸并冲出 Run（跳过 rollback）。
 		name := componentName(c)
 		if err := safeInit(c, ctx, app, mgr); err != nil {
-			return b.rollback(mgr, fmt.Errorf("bootstrap: component %s init failed: %w", name, err))
+			return b.rollback(mgr, pkgerrors.Wrapf(err, "bootstrap: component %s init failed", name))
 		}
 	}
 
@@ -222,7 +222,7 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	// （tracing exporter flush、nacos 断连、AddResource closer）被整体跳过。
 	for i, fn := range b.beforeServe {
 		if err := safeBeforeServe(fn); err != nil {
-			return b.rollback(mgr, fmt.Errorf("bootstrap: beforeServe[%d] failed: %w", i, err))
+			return b.rollback(mgr, pkgerrors.Wrapf(err, "bootstrap: beforeServe[%d] failed", i))
 		}
 	}
 
@@ -236,7 +236,7 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	async.GoSafe(func() {
 		defer func() {
 			if perr := pkgerrors.Recovered(recover()); perr != nil {
-				errCh <- fmt.Errorf("bootstrap: userFn: %w", perr)
+				errCh <- pkgerrors.Wrapf(perr, "bootstrap: userFn")
 			}
 		}()
 		errCh <- userFn(app)

@@ -31,7 +31,6 @@ package nacos
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -39,6 +38,7 @@ import (
 	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/logx"
 	nns "github.com/oekit/nns"
+	pkgerrors "github.com/oekit/pkg/errors"
 	"github.com/oekit/registry"
 	nacospkg "github.com/oekit/registry/nacos"
 )
@@ -122,7 +122,7 @@ type NNSComponent struct {
 	//     按组件粒度关掉 fail-fast（多 Bootstrapper / 宿主进程的逃生舱），
 	//     *true 等价于 ReadyFatal: true。
 	// 与 ReadyTimeout 的「负值显式关」同一救济口径：显式性由 *bool 承载
-	//（裸 bool 的 false 是零值，表达不了「我显式关」）。
+	// （裸 bool 的 false 是零值，表达不了「我显式关」）。
 	ReadyFatalOverride *bool
 
 	// registerState 记录注册流程状态，供 RegistrationState 查询
@@ -200,7 +200,7 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 	// 打 Warn 点名修法并记 PhaseSkipped（对照 Addr=="" 的一条 Info 口径）。
 	if c.NacosCfg.ServiceName == "" {
 		if c.Required {
-			return fmt.Errorf("nns init (required): %w", ErrServiceNameEmpty)
+			return pkgerrors.Wrapf(ErrServiceNameEmpty, "nns init (required)")
 		}
 		logger.Warn("nns init skipped: service name empty, set nacos.service_name or bootstrap.WithServiceName",
 			logx.ErrKey, ErrServiceNameEmpty)
@@ -218,7 +218,7 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 		// 避免 init 失败路径泄漏资源
 		nnsc.Close()
 		if c.Required {
-			return fmt.Errorf("nns init (required): %w", err)
+			return pkgerrors.Wrapf(err, "nns init (required)")
 		}
 		logger.Warn("NNS init failed, continuing without NNS", logx.ErrKey, err)
 		c.setRegisterState(&RegisterState{
@@ -249,8 +249,8 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 			// 上抛（注册缺失=对集群不可用，与 Init 失败同罪）；软依赖告警
 			// 续跑（对齐 Init 失败的处置口径）。
 			if c.Required {
-				return fmt.Errorf("nns: defer registration on required component %s: %w",
-					c.NacosCfg.ServiceName, err)
+				return pkgerrors.Wrapf(err, "nns: defer registration on required component %s",
+					c.NacosCfg.ServiceName)
 			}
 			logger.Warn("nns deferred registration dropped: app shutting down",
 				"service", c.NacosCfg.ServiceName, logx.ErrKey, err)
