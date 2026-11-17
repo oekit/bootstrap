@@ -234,11 +234,13 @@ func (b *Bootstrapper) Run(userFn func(*App) error) error {
 	// （errors.Is/As 可穿透 PanicError），栈与类型信息在场。
 	errCh := make(chan error, 1)
 	async.GoSafe(func() {
+		var perr error
 		defer func() {
-			if perr := pkgerrors.Recovered(recover()); perr != nil {
+			if perr != nil {
 				errCh <- pkgerrors.Wrapf(perr, "bootstrap: userFn")
 			}
 		}()
+		defer pkgerrors.RecoverTo(&perr)()
 		errCh <- userFn(app)
 	})
 
@@ -355,11 +357,7 @@ func (b *Bootstrapper) rollback(mgr *lifecycle.Manager, cause error) error {
 // 失败时错误身份不丢；上下文（组件名、init 阶段）由 rollback 的
 // 「component %s init failed」包装提供，此处不再叠加前缀。
 func safeInit(c Component, ctx context.Context, app *App, mgr *lifecycle.Manager) (err error) {
-	defer func() {
-		if perr := pkgerrors.Recovered(recover()); perr != nil {
-			err = perr
-		}
-	}()
+	defer pkgerrors.RecoverTo(&err)()
 	return c.Init(ctx, app, mgr)
 }
 
@@ -370,11 +368,7 @@ func safeInit(c Component, ctx context.Context, app *App, mgr *lifecycle.Manager
 // Run，rollback 不执行且调用方拿不到 bootstrap: 前缀错误——与 safeInit
 // godoc 自己声明的「保证失败回滚路径得以执行」纪律相矛盾。
 func safeBeforeServe(fn func() error) (err error) {
-	defer func() {
-		if perr := pkgerrors.Recovered(recover()); perr != nil {
-			err = perr
-		}
-	}()
+	defer pkgerrors.RecoverTo(&err)()
 	return fn()
 }
 

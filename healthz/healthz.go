@@ -89,25 +89,17 @@ const (
 )
 
 // DegradedError 表示软依赖降级:不影响就绪(HTTP 仍 200),该 check 记入
-// Result.Degraded、整体 status = StatusDegraded,供告警系统识别。与硬失败
+// Result.Degraded、整体 status = StatusDegraded,供告警识别。与硬失败
 // (普通 error → 503 + StatusUnhealthy)区分:软依赖(缓存、旁路服务)不可用
 // 应保持可见,但不应让就绪探针失败导致实例被摘流。
 // 语义与 hertz/health.DegradedError 三态对齐(oekit#140)。
-type DegradedError struct {
-	// Err 是导致降级的底层错误,经 Unwrap 暴露,可被 errors.Is/As 链识别。
-	Err error
-}
-
-// Error 实现 error 接口。
-func (e *DegradedError) Error() string {
-	if e.Err == nil {
-		return "degraded"
-	}
-	return e.Err.Error()
-}
-
-// Unwrap 返回底层错误,支持 errors.Is/As 链式判定。
-func (e *DegradedError) Unwrap() error { return e.Err }
+//
+// 实现已收编至 pkg/errors 单源(pkg#533):本包以类型别名保住既有导出面
+// ——healthz.DegradedError 与 pkgerrors.DegradedError 是同一类型,既有
+// errors.As/类型断言与字面量构造 &DegradedError{Err: ...} 消费方无感;
+// Error/Unwrap 方法由 pkg/errors 提供(Err 为 nil 时 Error() 回退
+// "degraded",与本包原实现逐字一致)。
+type DegradedError = pkgerrors.DegradedError
 
 // Degraded 将错误标记为软依赖降级。
 // 在 check 中返回 Degraded(err),Handle 仍返 200、Result.Status =
@@ -121,7 +113,7 @@ func (e *DegradedError) Unwrap() error { return e.Err }
 //	    }
 //	    return nil
 //	})
-func Degraded(err error) error { return &DegradedError{Err: err} }
+func Degraded(err error) error { return pkgerrors.Degraded(err) }
 
 // defaultCheckTimeout 是单次 Handle 允许的最长耗时;超时的 check 记为
 // failure("check timeout")。K8s probe 有自己的 timeoutSeconds,健康端点
@@ -377,10 +369,6 @@ func failureText(err error, runCtx context.Context, timeout time.Duration) strin
 // 身份不丢（errors.Is/As 可穿透），栈与类型信息在场；文案由 PanicError 的
 // "panic: <类型>: <值>" 提供（Result.Checks 记入该文本）。
 func safeRun(ctx context.Context, check Check) (err error) {
-	defer func() {
-		if perr := pkgerrors.Recovered(recover()); perr != nil {
-			err = perr
-		}
-	}()
+	defer pkgerrors.RecoverTo(&err)()
 	return check(ctx)
 }

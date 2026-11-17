@@ -504,11 +504,7 @@ func (a *App) closeAll(ctx context.Context) error {
 // （#182 单源）：panic(err) 的 error 身份不丢（errors.Is/As 可穿透），
 // 栈与类型信息在场。
 func runCloserWithBudget(parent context.Context, c namedCloser) (err error) {
-	defer func() {
-		if perr := pkgerrors.Recovered(recover()); perr != nil {
-			err = perr
-		}
-	}()
+	defer pkgerrors.RecoverTo(&err)()
 	if c.timeout <= 0 {
 		return c.closer(parent)
 	}
