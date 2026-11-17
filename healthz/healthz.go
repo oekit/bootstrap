@@ -377,10 +377,6 @@ func failureText(err error, runCtx context.Context, timeout time.Duration) strin
 // 身份不丢（errors.Is/As 可穿透），栈与类型信息在场；文案由 PanicError 的
 // "panic: <类型>: <值>" 提供（Result.Checks 记入该文本）。
 func safeRun(ctx context.Context, check Check) (err error) {
-	defer func() {
-		if perr := pkgerrors.Recovered(recover()); perr != nil {
-			err = perr
-		}
-	}()
+	defer pkgerrors.RecoverTo(&err)()
 	return check(ctx)
 }
