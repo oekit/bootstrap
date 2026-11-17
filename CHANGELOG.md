@@ -2,6 +2,12 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.14] — 2026-11-18
+
+- panic 收编骨架 5 处迁 pkg/errors.RecoverTo 单源 defer 出口(#182 收尾);healthz DegradedError 收敛 pkg/errors.Degraded 单源(pkg v0.53.0);obs TracingComponent.Init 空/非空 Endpoint 两分支合并去重(#271)
+
+关联问题单：bootstrap#271。
+
 ## [v0.7.13] — 2026-11-16
 
 - refactor: fmt.Errorf → oekit/pkg/errors 三形态对位替换（#520 替换波）+ 依赖地板抬至最新已发布
