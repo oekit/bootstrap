@@ -70,22 +70,10 @@ func (c *TracingComponent) SetServiceName(name string) { c.Config.ServiceName = 
 // （B3 + OpenTracing + W3C TraceContext + Baggage）。此前空 Endpoint 直接
 // return nil——trace 上下文传播器都不安装，跨服务 trace 断链且完全静默。
 func (c *TracingComponent) Init(_ context.Context, _ *bootstrap.App, mgr *lifecycle.Manager) error {
-	if c.Config.Endpoint == "" {
-		// 复用 tracing.Init 的本地 provider 语义（tracing#60）：装传播器，
-		// 不建导出器。留空端点通常是「本地开发/暂无 collector」，传播链
-		// 不应随之断掉；打 WARN 点明未启用导出。
-		provider, err := tracing.Init(c.Config)
-		if err != nil {
-			return pkgerrors.Wrapf(err, "tracing init")
-		}
-		mgr.Add("tracing", func(ctx context.Context) error {
-			return provider.Shutdown(ctx)
-		}, 0)
-		logger.Warn("tracing endpoint empty — installed local provider + propagator only (no OTLP export); " +
-			"set Endpoint to enable export")
-		return nil
-	}
-
+	// 空/非空 Endpoint 共用同一条初始化路径：tracing.Init(c.Config) 对两态
+	// 语义一致（#271）——endpoint 的处理在 tracing.Init 内部（空端点复用其
+	// 本地 provider 语义，tracing#60），此处只需按是否配置了导出端点打
+	// 不同级别的日志：空端点 WARN 点明未启用导出，非空端点 INFO 带上端点。
 	provider, err := tracing.Init(c.Config)
 	if err != nil {
 		return pkgerrors.Wrapf(err, "tracing init")
@@ -93,6 +81,14 @@ func (c *TracingComponent) Init(_ context.Context, _ *bootstrap.App, mgr *lifecy
 	mgr.Add("tracing", func(ctx context.Context) error {
 		return provider.Shutdown(ctx)
 	}, 0)
+	if c.Config.Endpoint == "" {
+		// 复用 tracing.Init 的本地 provider 语义（tracing#60）：装传播器，
+		// 不建导出器。留空端点通常是「本地开发/暂无 collector」，传播链
+		// 不应随之断掉；打 WARN 点明未启用导出。
+		logger.Warn("tracing endpoint empty — installed local provider + propagator only (no OTLP export); " +
+			"set Endpoint to enable export")
+		return nil
+	}
 	logger.Info("tracing initialized", "endpoint", c.Config.Endpoint)
 	return nil
 }
