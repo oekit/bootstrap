@@ -7,7 +7,7 @@ require (
 	github.com/oekit/core v0.17.0
 	github.com/oekit/logx v0.12.0
 	github.com/oekit/nns v0.9.3
-	github.com/oekit/pkg v0.54.0
+	github.com/oekit/pkg v0.55.0
 	github.com/oekit/registry v0.8.0
 	github.com/oekit/registry/nacos v0.2.0
 )
