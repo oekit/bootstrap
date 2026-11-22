@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.15] — 2026-11-23
+
+- build: 依赖地板对齐（矩阵地板波次）——新地板：github.com/oekit/concurrency v0.40.0 github.com/oekit/core v0.18.0 github.com/oekit/logx v0.12.1 github.com/oekit/pkg v0.60.0 。零行为变化；已发布产物的 go.mod 地板此前滞后于矩阵登记版本，本版把新地板焊进已发布产物。
+
 ## [v0.7.14] — 2026-11-18
 
 - panic 收编骨架 5 处迁 pkg/errors.RecoverTo 单源 defer 出口(#182 收尾);healthz DegradedError 收敛 pkg/errors.Degraded 单源(pkg v0.53.0);obs TracingComponent.Init 空/非空 Endpoint 两分支合并去重(#271)
