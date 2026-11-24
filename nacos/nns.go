@@ -31,7 +31,6 @@ package nacos
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -39,6 +38,7 @@ import (
 	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/logx"
 	nns "github.com/oekit/nns"
+	pkgerrors "github.com/oekit/pkg/errors"
 	"github.com/oekit/registry"
 	nacospkg "github.com/oekit/registry/nacos"
 )
@@ -74,6 +74,15 @@ func init() {
 // 部署门禁/重启策略可按此判定启动失败。
 var ErrReadyFatal = errors.New("nns: app.Ready() not called within ReadyTimeout (fail-fast enabled; " +
 	"裸 h.Spin() 起服务的消费方必须显式调用 app.Ready()，或改用 hertz/kitex RunServer 的 WithOnReady)")
+
+// ErrServiceNameEmpty 是 NNS 初始化因服务名缺失被跳过/拒绝的哨兵（#255，
+// errors.Is 可辨）：Addr 已配但 ServiceName 为空 = 漏配 nacos.service_name
+// 且没有 bootstrap.WithServiceName 回填。空服务名会让 GetConfig（dataId 空）
+// / WatchService / Register 三条链依次失效，此前各只一条泛化日志、无一
+// 点名根因——本哨兵把根因写死在错误文案里；Required 场景经 Init 返回，
+// 软依赖场景记入 RegistrationState（PhaseSkipped + Err）。
+var ErrServiceNameEmpty = errors.New("nns: service name empty——漏配 nacos.service_name" +
+	"（且无 bootstrap.WithServiceName 回填）；空服务名会让配置拉取/热更/注册三链依次失效")
 
 // NNSComponent NNS 服务治理组件，负责 NNS 客户端初始化和服务注册。
 // （自 bootstrap 根包迁移，行为不变。）
@@ -113,7 +122,7 @@ type NNSComponent struct {
 	//     按组件粒度关掉 fail-fast（多 Bootstrapper / 宿主进程的逃生舱），
 	//     *true 等价于 ReadyFatal: true。
 	// 与 ReadyTimeout 的「负值显式关」同一救济口径：显式性由 *bool 承载
-	//（裸 bool 的 false 是零值，表达不了「我显式关」）。
+	// （裸 bool 的 false 是零值，表达不了「我显式关」）。
 	ReadyFatalOverride *bool
 
 	// registerState 记录注册流程状态，供 RegistrationState 查询
@@ -123,6 +132,22 @@ type NNSComponent struct {
 
 // Name 返回组件名称。
 func (c *NNSComponent) Name() string { return "nns" }
+
+// SetServiceName 实现 bootstrap.ServiceNameAware（#255）：把 WithServiceName
+// 的服务名回填进 NacosCfg.ServiceName。此前 NNSComponent 只有 Name/Init、
+// 不实现本接口，bootstrap.WithServiceName 的服务名到不了 NacosCfg——yaml
+// 漏配 nacos.service_name 时 GetConfig（dataId 空）/WatchService/Register
+// 三条链依次失效，各只一条泛化日志、无一点名根因（Register 的错误文案
+// 还把排障引向其实已调用的 Init）。
+//
+// 只在为空时回填（幂等，New 的统一回填与 AddComponent 就地补做可能各执行
+// 一次）：不覆盖 yaml 里显式配置的 nacos.service_name——组件自身配置优先，
+// 服务名缺口由本接口补上。
+func (c *NNSComponent) SetServiceName(name string) {
+	if c.NacosCfg.ServiceName == "" {
+		c.NacosCfg.ServiceName = name
+	}
+}
 
 // nnsClient 是组件对 NNS 门面的最小依赖面（*nns.NNSClient 隐式满足），
 // 供测试替换（newNNSClient 缝）。
@@ -144,8 +169,10 @@ var newNNSClient = func(cfg nacospkg.Bootstrap, opts ...nns.NNSOption) nnsClient
 // 编排三个关注点（#180 拆分后的编排骨架，注册流程在 nns_register.go、
 // 状态机在 nns_state.go）：
 //
-//  1. 空地址短路（PhaseSkipped）与客户端构造（失败按 Required 决定
-//     fail-fast 或告警续跑，失败路径释放已建客户端防泄漏）；
+//  1. 空地址短路与服务名缺失短路（均记 PhaseSkipped；后者点名
+//     nacos.service_name 根因，#255，Required 时返回 ErrServiceNameEmpty）
+//     与客户端构造（失败按 Required 决定 fail-fast 或告警续跑，失败路径
+//     释放已建客户端防泄漏）；
 //  2. 端口启用时挂延迟注册后台任务（看门狗 → 注册 → 反注册挂载）；
 //  3. 客户端关闭挂 mgr（nns-client job，关停尾部释放）。
 //
@@ -164,13 +191,34 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 		return nil
 	}
 
+	// 服务名缺失短路（#255）：Addr 已配但 ServiceName 为空（漏配
+	// nacos.service_name 且无 WithServiceName 回填）——空 dataId/服务名会让
+	// GetConfig/WatchService/Register 三链依次失效，此前各只一条泛化日志
+	// （"get service config failed, using default" / "listen service config
+	// failed" / "service name unknown; call Init..."），无一点名根因。
+	// 在建客户端之前 fail-fast：Required 返回哨兵错误（启动失败）；软依赖
+	// 打 Warn 点名修法并记 PhaseSkipped（对照 Addr=="" 的一条 Info 口径）。
+	if c.NacosCfg.ServiceName == "" {
+		if c.Required {
+			return pkgerrors.Wrapf(ErrServiceNameEmpty, "nns init (required)")
+		}
+		logger.Warn("nns init skipped: service name empty, set nacos.service_name or bootstrap.WithServiceName",
+			logx.ErrKey, ErrServiceNameEmpty)
+		c.setRegisterState(&RegisterState{
+			Phase: PhaseSkipped,
+			Err:   ErrServiceNameEmpty,
+			Since: time.Now(),
+		})
+		return nil
+	}
+
 	nnsc := newNNSClient(c.NacosCfg, c.NSNOpts...)
 	if err := nnsc.Init(ctx, c.NacosCfg.ServiceName, c.DepServices); err != nil {
 		// 释放已创建的 naming/config 客户端（各带后台 goroutine），
 		// 避免 init 失败路径泄漏资源
 		nnsc.Close()
 		if c.Required {
-			return fmt.Errorf("nns init (required): %w", err)
+			return pkgerrors.Wrapf(err, "nns init (required)")
 		}
 		logger.Warn("NNS init failed, continuing without NNS", logx.ErrKey, err)
 		c.setRegisterState(&RegisterState{
@@ -201,8 +249,8 @@ func (c *NNSComponent) Init(ctx context.Context, app *bootstrap.App, mgr *lifecy
 			// 上抛（注册缺失=对集群不可用，与 Init 失败同罪）；软依赖告警
 			// 续跑（对齐 Init 失败的处置口径）。
 			if c.Required {
-				return fmt.Errorf("nns: defer registration on required component %s: %w",
-					c.NacosCfg.ServiceName, err)
+				return pkgerrors.Wrapf(err, "nns: defer registration on required component %s",
+					c.NacosCfg.ServiceName)
 			}
 			logger.Warn("nns deferred registration dropped: app shutting down",
 				"service", c.NacosCfg.ServiceName, logx.ErrKey, err)

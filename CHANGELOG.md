@@ -2,6 +2,38 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.15] — 2026-11-23
+
+- build: 依赖地板对齐（矩阵地板波次）——新地板：github.com/oekit/concurrency v0.40.0 github.com/oekit/core v0.18.0 github.com/oekit/logx v0.12.1 github.com/oekit/pkg v0.60.0 。零行为变化；已发布产物的 go.mod 地板此前滞后于矩阵登记版本，本版把新地板焊进已发布产物。
+
+## [v0.7.14] — 2026-11-18
+
+- panic 收编骨架 5 处迁 pkg/errors.RecoverTo 单源 defer 出口(#182 收尾);healthz DegradedError 收敛 pkg/errors.Degraded 单源(pkg v0.53.0);obs TracingComponent.Init 空/非空 Endpoint 两分支合并去重(#271)
+
+关联问题单：bootstrap#271。
+
+## [v0.7.13] — 2026-11-16
+
+- refactor: fmt.Errorf → oekit/pkg/errors 三形态对位替换（#520 替换波）+ 依赖地板抬至最新已发布
+
+## [nacos/v0.3.25] — 2026-11-15
+
+- 排空预算独立（#253）：app-lifecycle:drain 注册 timeout 0→-1，排空预算只归 SetDrainTimeout 管辖，不再被 WithShutdownTimeout(10s) 封顶，Shutdown ctx 仍传播为中止信号
+- healthz 超时竞态（#254）：结果与 deadline 同时就绪时先非阻塞排空结果通道再记 timeout，已完成的 check 不再被随机选中的 deadline 丢弃
+- NNS 服务名回填与建连前校验（#255）：NNSComponent 实现 ServiceNameAware 空值回填；Addr 已配而 nacos.service_name 为空时 Required 返回 ErrServiceNameEmpty、软依赖 Warn 跳过（改动在嵌套 nacos 模块，随 train 同发）
+- AddOnce panic 口径（#256）：与 AddTicker 同款内层 recover 单源 runTaskPanicContained，panic 日志带 task= 名，不再直落 async 全局 handler
+
+关联问题单：bootstrap#253、bootstrap#254、bootstrap#255、bootstrap#256。
+
+## [v0.7.12] — 2026-11-15
+
+- 排空预算独立（#253）：app-lifecycle:drain 注册 timeout 0→-1，排空预算只归 SetDrainTimeout 管辖，不再被 WithShutdownTimeout(10s) 封顶，Shutdown ctx 仍传播为中止信号
+- healthz 超时竞态（#254）：结果与 deadline 同时就绪时先非阻塞排空结果通道再记 timeout，已完成的 check 不再被随机选中的 deadline 丢弃
+- NNS 服务名回填与建连前校验（#255）：NNSComponent 实现 ServiceNameAware 空值回填；Addr 已配而 nacos.service_name 为空时 Required 返回 ErrServiceNameEmpty、软依赖 Warn 跳过（改动在嵌套 nacos 模块，随 train 同发）
+- AddOnce panic 口径（#256）：与 AddTicker 同款内层 recover 单源 runTaskPanicContained，panic 日志带 task= 名，不再直落 async 全局 handler
+
+关联问题单：bootstrap#253、bootstrap#254、bootstrap#255、bootstrap#256。
+
 ## [v0.7.11] — 2026-11-13
 
 - 关停/healthz 批：doc.go/README lifecycle 引用修正（#184）、WithReadyFatal godoc 与实现对齐（#185）、关停期注册语义统一（#186）、ResetForTest 内收（#187）、logx.ErrKey 收口（#188）、Run 裸 panic 修复（#201）、ReadyFatal 组件字段逃生（#202）、零值语义（#203）、告警语义（#205）、配置面收口（#206）、WorkerManager.Wait 永不返回（#210）、NNS 测试相位轮询（#220）

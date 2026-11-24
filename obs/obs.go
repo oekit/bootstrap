@@ -16,12 +16,12 @@ package obs
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/oekit/bootstrap"
 	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/logx"
 	"github.com/oekit/metrics"
+	pkgerrors "github.com/oekit/pkg/errors"
 	"github.com/oekit/tracing"
 )
 
@@ -55,6 +55,14 @@ type TracingComponent struct {
 // Name 返回组件名称。
 func (c *TracingComponent) Name() string { return "tracing" }
 
+// SetServiceName 实现 bootstrap.ServiceNameAware，由 New 统一回填（#131 同款）。
+//
+// tracing v0.4.6 起 ServiceName **必填**（tracing#168：空串会以最后一个
+// detector 身份压过 OTEL_RESOURCE_ATTRIBUTES，Init 直接报错）——本组件必须
+// 接住 bootstrap.WithServiceName 的回填，否则「只配一次服务名」的宿主应用
+// 会在追踪初始化时 fail-loud 而 MetricsComponent 却正常，两组件口径劈叉。
+func (c *TracingComponent) SetServiceName(name string) { c.Config.ServiceName = name }
+
 // Init 初始化 OpenTelemetry 追踪，并注册 shutdown 钩子。
 //
 // 空 Endpoint 的语义与直接调用 tracing.Init 对齐（tracing#60）：不创建
@@ -62,29 +70,25 @@ func (c *TracingComponent) Name() string { return "tracing" }
 // （B3 + OpenTracing + W3C TraceContext + Baggage）。此前空 Endpoint 直接
 // return nil——trace 上下文传播器都不安装，跨服务 trace 断链且完全静默。
 func (c *TracingComponent) Init(_ context.Context, _ *bootstrap.App, mgr *lifecycle.Manager) error {
-	if c.Config.Endpoint == "" {
-		// 复用 tracing.Init 的本地 provider 语义（tracing#60）：装传播器，
-		// 不建导出器。留空端点通常是「本地开发/暂无 collector」，传播链
-		// 不应随之断掉；打 WARN 点明未启用导出。
-		provider, err := tracing.Init(c.Config)
-		if err != nil {
-			return fmt.Errorf("tracing init: %w", err)
-		}
-		mgr.Add("tracing", func(ctx context.Context) error {
-			return provider.Shutdown(ctx)
-		}, 0)
-		logger.Warn("tracing endpoint empty — installed local provider + propagator only (no OTLP export); " +
-			"set Endpoint to enable export")
-		return nil
-	}
-
+	// 空/非空 Endpoint 共用同一条初始化路径：tracing.Init(c.Config) 对两态
+	// 语义一致（#271）——endpoint 的处理在 tracing.Init 内部（空端点复用其
+	// 本地 provider 语义，tracing#60），此处只需按是否配置了导出端点打
+	// 不同级别的日志：空端点 WARN 点明未启用导出，非空端点 INFO 带上端点。
 	provider, err := tracing.Init(c.Config)
 	if err != nil {
-		return fmt.Errorf("tracing init: %w", err)
+		return pkgerrors.Wrapf(err, "tracing init")
 	}
 	mgr.Add("tracing", func(ctx context.Context) error {
 		return provider.Shutdown(ctx)
 	}, 0)
+	if c.Config.Endpoint == "" {
+		// 复用 tracing.Init 的本地 provider 语义（tracing#60）：装传播器，
+		// 不建导出器。留空端点通常是「本地开发/暂无 collector」，传播链
+		// 不应随之断掉；打 WARN 点明未启用导出。
+		logger.Warn("tracing endpoint empty — installed local provider + propagator only (no OTLP export); " +
+			"set Endpoint to enable export")
+		return nil
+	}
 	logger.Info("tracing initialized", "endpoint", c.Config.Endpoint)
 	return nil
 }
